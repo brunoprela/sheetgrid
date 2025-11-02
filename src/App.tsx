@@ -1,11 +1,18 @@
 import { useState, useRef, useEffect } from 'react';
-import { useUser, useStackApp } from '@stackframe/react';
+import { Routes, Route, useLocation } from 'react-router-dom';
+import { useUser, useStackApp, StackHandler } from '@stackframe/react';
+import { stackClientApp } from './providers/StackAuthProvider';
 import Spreadsheet from '@/components/Spreadsheet';
 import ChatPanel from '@/components/ChatPanel';
 import LandingPage from '@/components/LandingPage';
 import SignInPage from '@/components/SignInPage';
 import AuthButton from '@/components/AuthButton';
 import { getAllChats, createChat, deleteChat, type Chat } from './utils/indexeddb';
+
+function HandlerRoutes() {
+  const location = useLocation();
+  return <StackHandler app={stackClientApp} location={location.pathname} fullPage />;
+}
 
 function App() {
   const user = useUser();
@@ -251,6 +258,11 @@ function App() {
     setShowSignIn(true);
   };
 
+  const location = useLocation();
+  
+  // Check if we're on a handler route - these should be handled by StackHandler
+  const isHandlerRoute = location.pathname.startsWith('/handler/');
+
   // Allow scrolling on landing/sign-in pages when zoomed, prevent it on main app
   useEffect(() => {
     if (showLanding || showSignIn) {
@@ -269,16 +281,22 @@ function App() {
     }
   }, [user, showSignIn]);
 
-  // Show sign-in page if we're on that route
+  // Handler routes (like /handler/oauth-callback) must be handled by StackHandler
+  if (isHandlerRoute) {
+    return <HandlerRoutes />;
+  }
+
+  // Show sign-in page if requested
   if (showSignIn) {
     return <SignInPage />;
   }
 
-  // Show landing page if user hasn't seen it
+  // Show landing page if user is not signed in
   if (showLanding) {
     return <LandingPage onGetStarted={handleGetStarted} />;
   }
 
+  // Main app (user is signed in)
   return (
     <div className="flex flex-col h-screen bg-white">
       {/* Header Bar */}

@@ -4,6 +4,16 @@
   "installCommand": "pnpm install",
   "framework": "vite",
   "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/handler/:path*",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",
