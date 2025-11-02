@@ -2,7 +2,6 @@
 
 import { useEffect, useRef } from 'react';
 import { createUniver, LocaleType, UniverInstanceType } from '@univerjs/presets';
-import { mergeLocales } from '@univerjs/core';
 import { UniverSheetsCorePreset } from '@univerjs/presets/preset-sheets-core';
 import UniverPresetSheetsCoreEnUS from '@univerjs/presets/preset-sheets-core/locales/en-US';
 import { UniverSheetsAdvancedPreset } from '@univerjs/presets/preset-sheets-advanced';
@@ -45,6 +44,11 @@ import '@univerjs/presets/lib/styles/preset-sheets-data-validation.css';
 import '@univerjs/presets/lib/styles/preset-sheets-drawing.css';
 import '@univerjs-pro/mcp-ui/lib/index.css';
 
+// Define merge function to match start kit
+const merge = <T extends Record<string, any>>(target: T, ...sources: any[]): T => {
+  return Object.assign({}, target, ...sources);
+};
+
 interface SpreadsheetProps {}
 
 export default function Spreadsheet({}: SpreadsheetProps) {
@@ -63,7 +67,8 @@ export default function Spreadsheet({}: SpreadsheetProps) {
     const { univerAPI, univer } = createUniver({
       locale: LocaleType.EN_US,
       locales: {
-        [LocaleType.EN_US]: mergeLocales(
+        [LocaleType.EN_US]: merge(
+          {},
           UniverPresetSheetsCoreEnUS,
           UniverPresetSheetsAdvancedEnUS,
           UniverPresetSheetsDrawingEnUS,
