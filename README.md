@@ -1,6 +1,6 @@
 # SheetGrid - AI-Powered Excel Editor
 
-A modern, AI-powered spreadsheet editor built with Next.js and Ollama. Upload Excel files, edit them in a beautiful interface, and interact with your data using natural language AI commands.
+A modern, AI-powered spreadsheet editor built with Vite, React, and OpenRouter. Upload Excel files, edit them in a beautiful interface, and interact with your data using natural language AI commands.
 
 ## Features
 
@@ -28,18 +28,13 @@ A modern, AI-powered spreadsheet editor built with Next.js and Ollama. Upload Ex
 ## Prerequisites
 
 - Node.js 18+ and pnpm
-- [Ollama](https://ollama.ai/) installed and running locally
-- The `llama3.2` model installed in Ollama
+- An [OpenRouter](https://openrouter.ai) API key
 
-### Installing Ollama
+### Getting an OpenRouter API Key
 
-1. Download and install Ollama from [https://ollama.ai](https://ollama.ai)
-2. Start the Ollama service
-3. Install the llama3.2 model:
-
-```bash
-ollama pull llama3.2
-```
+1. Sign up at [https://openrouter.ai](https://openrouter.ai)
+2. Create an API key in your dashboard
+3. Copy your API key
 
 ## Installation
 
@@ -56,13 +51,21 @@ cd sheetgrid
 pnpm install
 ```
 
-3. Start the development server:
+3. Configure your OpenRouter API key:
+
+Create a `.env` file in the root directory:
+
+```bash
+echo "VITE_OPENROUTER_API_KEY=your_api_key_here" > .env
+```
+
+4. Start the development server:
 
 ```bash
 pnpm dev
 ```
 
-4. Open [http://localhost:3000](http://localhost:3000) in your browser
+5. Open [http://localhost:5173](http://localhost:5173) in your browser
 
 ### Generate Sample Data
 
@@ -116,7 +119,8 @@ The AI assistant can help you:
 
 ## Tech Stack
 
-- **Next.js 16**: React framework with App Router
+- **Vite**: Fast build tool and development server
+- **React 19**: UI library
 - **TypeScript**: Type safety
 - **Tailwind CSS**: Styling
 - **Univer**: Professional Excel-like spreadsheet component
@@ -126,21 +130,23 @@ The AI assistant can help you:
 - **file-saver**: File download capabilities
 - **jszip**: ZIP file manipulation
 - **fast-xml-parser**: Fast XML parsing
-- **Ollama**: Local AI inference with function calling
+- **OpenRouter**: AI model routing with tool calling support
 
 ## Project Structure
 
 ```
 sheetgrid/
-├── app/
-│   ├── layout.tsx        # Root layout
-│   ├── page.tsx          # Main page component
-│   └── globals.css       # Global styles
+├── src/
+│   ├── main.tsx          # Entry point
+│   ├── App.tsx           # Main app component
+│   └── index.css         # Global styles
 ├── components/
 │   ├── Spreadsheet.tsx   # Univer spreadsheet component
 │   └── ChatPanel.tsx     # AI chat interface with tool calling
 ├── scripts/
 │   └── generate-sample-data.js  # Sample Excel generator
+├── index.html            # HTML template
+├── vite.config.ts        # Vite configuration
 └── package.json
 ```
 
@@ -156,7 +162,7 @@ Build for production:
 
 ```bash
 pnpm build
-pnpm start
+pnpm preview
 ```
 
 ## MCP Integration
@@ -167,23 +173,21 @@ See [MCP_SETUP.md](./MCP_SETUP.md) for detailed setup instructions.
 
 ## Troubleshooting
 
-### Ollama Connection Issues
+### OpenRouter Connection Issues
 
-If you see errors about Ollama connection:
+If you see errors about OpenRouter API:
 
-1. Make sure Ollama is running: `ollama serve`
-2. Verify the model is installed: `ollama list`
-3. Test the API: `curl http://localhost:11434/api/tags`
+1. Make sure your API key is set in `.env`: `VITE_OPENROUTER_API_KEY=your_key`
+2. Verify your API key is valid at [https://openrouter.ai/keys](https://openrouter.ai/keys)
+3. Check that you have sufficient credits in your OpenRouter account
 
-### Model Performance
+### Model Selection
 
-For better performance with large spreadsheets, consider using a more powerful model:
-
-```bash
-ollama pull llama3.3
-```
-
-Then update the model name in `components/ChatPanel.tsx` (line ~143).
+You can choose from various free-tier models with tool calling support in the chat panel dropdown:
+- `meta-llama/llama-3.2-3b-instruct:free` - Meta's Llama 3.2
+- `google/gemini-flash-1.5` - Google's Gemini Flash 1.5
+- `mistralai/mistral-7b-instruct:free` - Mistral 7B
+- `mistralai/mixtral-8x7b-instruct:free` - Mixtral 8x7B
 
 ## License
 

@@ -2,11 +2,13 @@
   "name": "sheetgrid",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "dev": "vite --host",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "dependencies": {
     "@univerjs-pro/mcp": "0.10.8",
@@ -46,9 +48,12 @@
     "@types/node": "^20.19.24",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@univerjs/vite-plugin": "^0.5.1",
+    "@vitejs/plugin-react": "^5.1.0",
     "eslint": "^9",
     "eslint-config-next": "16.0.1",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vite": "^7.1.12"
   }
 }
