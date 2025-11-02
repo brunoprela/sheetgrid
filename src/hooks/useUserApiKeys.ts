@@ -6,7 +6,7 @@ export function useUserApiKeys() {
   const user = useUser();
   const [openRouterKey, setOpenRouterKey] = useState<string | null>(null);
   const [univerMcpKey, setUniverMcpKey] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     const loadKeys = async () => {
@@ -17,17 +17,23 @@ export function useUserApiKeys() {
         return;
       }
 
-      // Check localStorage cache first
-      const cachedOpenRouter = localStorage.getItem(`openrouter_key_${user.id}`);
-      const cachedUniverMcp = localStorage.getItem(`univer_mcp_key_${user.id}`);
+      setLoading(true);
 
-      if (cachedOpenRouter || cachedUniverMcp) {
-        setOpenRouterKey(cachedOpenRouter);
-        setUniverMcpKey(cachedUniverMcp);
-        setLoading(false);
+      // Check localStorage cache first for immediate response
+      try {
+        const cachedOpenRouter = localStorage.getItem(`openrouter_key_${user.id}`);
+        const cachedUniverMcp = localStorage.getItem(`univer_mcp_key_${user.id}`);
+
+        if (cachedOpenRouter || cachedUniverMcp) {
+          setOpenRouterKey(cachedOpenRouter);
+          setUniverMcpKey(cachedUniverMcp);
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error('Error reading from localStorage:', error);
       }
-
-      // Load from NeonDB
+      
+      // Load from NeonDB in background (non-blocking)
       try {
         const keys = await getUserApiKeys(user.id);
         if (keys) {
@@ -38,15 +44,24 @@ export function useUserApiKeys() {
           setUniverMcpKey(univerKey);
           
           // Update cache
-          if (orKey) {
-            localStorage.setItem(`openrouter_key_${user.id}`, orKey);
-          }
-          if (univerKey) {
-            localStorage.setItem(`univer_mcp_key_${user.id}`, univerKey);
+          try {
+            if (orKey) {
+              localStorage.setItem(`openrouter_key_${user.id}`, orKey);
+            } else {
+              localStorage.removeItem(`openrouter_key_${user.id}`);
+            }
+            if (univerKey) {
+              localStorage.setItem(`univer_mcp_key_${user.id}`, univerKey);
+            } else {
+              localStorage.removeItem(`univer_mcp_key_${user.id}`);
+            }
+          } catch (storageError) {
+            console.error('Error updating localStorage:', storageError);
           }
         }
       } catch (error) {
         console.error('Error loading API keys:', error);
+        // Don't block the app if database fails - fallback to env vars
       } finally {
         setLoading(false);
       }

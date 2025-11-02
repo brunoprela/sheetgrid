@@ -3,9 +3,22 @@ import { drizzle } from 'drizzle-orm/neon-http';
 import { pgTable, text, timestamp } from 'drizzle-orm/pg-core';
 import { eq } from 'drizzle-orm';
 
-// Use serverless Neon connection
-const sql = neon(import.meta.env.VITE_DATABASE_URL || import.meta.env.DATABASE_URL || '');
-export const db = drizzle(sql);
+// Lazy initialization of database connection
+let dbInstance: ReturnType<typeof drizzle> | null = null;
+
+function getDb() {
+  if (!dbInstance) {
+    const databaseUrl = import.meta.env.VITE_DATABASE_URL || import.meta.env.DATABASE_URL;
+    if (!databaseUrl) {
+      console.warn('DATABASE_URL not configured. API key storage will not work.');
+      // Return a mock db that throws errors gracefully
+      return null;
+    }
+    const sql = neon(databaseUrl);
+    dbInstance = drizzle(sql);
+  }
+  return dbInstance;
+}
 
 // Schema for user API keys
 export const userApiKeys = pgTable('user_api_keys', {
@@ -18,6 +31,10 @@ export const userApiKeys = pgTable('user_api_keys', {
 
 export async function getUserApiKeys(userId: string) {
   try {
+    const db = getDb();
+    if (!db) {
+      return null;
+    }
     const result = await db.select().from(userApiKeys).where(eq(userApiKeys.userId, userId)).limit(1);
     return result[0] || null;
   } catch (error) {
@@ -28,6 +45,11 @@ export async function getUserApiKeys(userId: string) {
 
 export async function saveUserApiKeys(userId: string, keys: { openRouterKey?: string; univerMcpKey?: string }) {
   try {
+    const db = getDb();
+    if (!db) {
+      throw new Error('Database not configured. Please set DATABASE_URL environment variable.');
+    }
+    
     const now = new Date();
     const existing = await getUserApiKeys(userId);
     
