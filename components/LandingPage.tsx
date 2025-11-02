@@ -1,4 +1,4 @@
-import { useStackApp } from '@stackframe/stack';
+import { useStackApp } from '@stackframe/react';
 
 export default function LandingPage({ onGetStarted }: { onGetStarted: () => void }) {
   const stackApp = useStackApp();

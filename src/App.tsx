@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { useUser, useStackApp } from '@stackframe/stack';
+import { useUser, useStackApp } from '@stackframe/react';
 import Spreadsheet from '@/components/Spreadsheet';
 import ChatPanel from '@/components/ChatPanel';
 import LandingPage from '@/components/LandingPage';

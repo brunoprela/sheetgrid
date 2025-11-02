@@ -8,9 +8,9 @@ importers:
 
   .:
     dependencies:
-      '@stackframe/stack':
+      '@stackframe/react':
         specifier: ^2.8.48
-        version: 2.8.48(@aws-sdk/credential-provider-web-identity@3.922.0)(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(next@16.0.1(@babel/core@7.28.5)(@opentelemetry/api@1.9.0)(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(tailwindcss@4.1.16)
+        version: 2.8.48(@aws-sdk/credential-provider-web-identity@3.922.0)(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(tailwindcss@4.1.16)
       '@univerjs-pro/mcp':
         specifier: 0.10.8
         version: 0.10.8(@grpc/grpc-js@1.14.0)(@wendellhu/redi@1.0.0(react@19.2.0))(rxjs@7.8.2)
@@ -2102,18 +2102,13 @@ packages:
     resolution: {integrity: sha512-4aUIteuyxtBUhVdiQqcDhKFitwfd9hqoSDYY2KRXiWtgoWJ9Bmise+KfEPDiVHWeJepvF8xJO9/9+WDIciMFFw==}
     engines: {node: '>=18.0.0'}
 
-  '@stackframe/stack-sc@2.8.48':
-    resolution: {integrity: sha512-Iu4GqH9ij1wGOcYR0l/OrG2/rRDstW66mxju2vXBYIpTQXKlR40D4Kf3rbSdx6wez6pWCQVfm9V9jznLWPz9nA==}
+  '@stackframe/react@2.8.48':
+    resolution: {integrity: sha512-jatyKelDVwfT49Q7ztrNQENQFQJieKeV7isZDGX7u9dx39apb6WQx9rftVZtl6Mo9dqXqB808qnAX+XOxXELTg==}
     peerDependencies:
       '@types/react': '>=19.0.0'
-      '@types/react-dom': '>=19.0.0'
-      next: '>=14.1 || >=15.0.0-rc.0'
       react: '>=19.0.0'
-      react-dom: '>=19.0.0'
     peerDependenciesMeta:
       '@types/react':
-        optional: true
-      '@types/react-dom':
         optional: true
 
   '@stackframe/stack-shared@2.8.48':
@@ -2148,20 +2143,6 @@ packages:
       '@types/react-dom':
         optional: true
       yup:
-        optional: true
-
-  '@stackframe/stack@2.8.48':
-    resolution: {integrity: sha512-2bjW/uE++byQAQhj7JsgDRRoXqP3OIS3mlEod2DCpRR56u8PunRmnFnQNcdxEfnfiGZwaNribZ1VkR5Oy6XNbA==}
-    peerDependencies:
-      '@types/react': '>=19.0.0'
-      '@types/react-dom': '>=19.0.0'
-      next: '>=14.1 || >=15.0.0-canary.0 || >=15.0.0-rc.0'
-      react: '>=19.0.0'
-      react-dom: '>=19.0.0'
-    peerDependenciesMeta:
-      '@types/react':
-        optional: true
-      '@types/react-dom':
         optional: true
 
   '@swc/helpers@0.5.15':
@@ -8038,14 +8019,38 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
-  '@stackframe/stack-sc@2.8.48(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(next@16.0.1(@babel/core@7.28.5)(@opentelemetry/api@1.9.0)(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(react-dom@19.2.0(react@19.2.0))(react@19.2.0)':
+  '@stackframe/react@2.8.48(@aws-sdk/credential-provider-web-identity@3.922.0)(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(tailwindcss@4.1.16)':
     dependencies:
-      next: 16.0.1(@babel/core@7.28.5)(@opentelemetry/api@1.9.0)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      '@hookform/resolvers': 3.10.0(react-hook-form@7.66.0(react@19.2.0))
+      '@oslojs/otp': 1.1.0
+      '@simplewebauthn/browser': 11.0.0
+      '@stackframe/stack-shared': 2.8.48(@aws-sdk/credential-provider-web-identity@3.922.0)(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(yup@1.7.1)
+      '@stackframe/stack-ui': 2.8.48(@aws-sdk/credential-provider-web-identity@3.922.0)(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(yup@1.7.1)
+      '@tanstack/react-table': 8.21.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      browser-image-compression: 2.0.2
+      color: 4.2.3
+      cookie: 0.6.0
+      jose: 5.9.6
+      js-cookie: 3.0.5
+      lucide-react: 0.378.0(react@19.2.0)
+      oauth4webapi: 2.17.0
+      qrcode: 1.5.4
       react: 19.2.0
-      react-dom: 19.2.0(react@19.2.0)
+      react-easy-crop: 5.5.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      react-hook-form: 7.66.0(react@19.2.0)
+      rimraf: 5.0.10
+      tailwindcss-animate: 1.0.7(tailwindcss@4.1.16)
+      tsx: 4.19.2
+      yup: 1.7.1
     optionalDependencies:
       '@types/react': 19.2.2
-      '@types/react-dom': 19.2.2(@types/react@19.2.2)
+    transitivePeerDependencies:
+      - '@aws-sdk/credential-provider-web-identity'
+      - '@types/react-dom'
+      - aws-crt
+      - buffer
+      - react-dom
+      - tailwindcss
 
   '@stackframe/stack-shared@2.8.48(@aws-sdk/credential-provider-web-identity@3.922.0)(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(yup@1.7.1)':
     dependencies:
@@ -8128,41 +8133,6 @@ snapshots:
       - '@aws-sdk/credential-provider-web-identity'
       - aws-crt
       - buffer
-
-  '@stackframe/stack@2.8.48(@aws-sdk/credential-provider-web-identity@3.922.0)(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(next@16.0.1(@babel/core@7.28.5)(@opentelemetry/api@1.9.0)(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(tailwindcss@4.1.16)':
-    dependencies:
-      '@hookform/resolvers': 3.10.0(react-hook-form@7.66.0(react@19.2.0))
-      '@oslojs/otp': 1.1.0
-      '@simplewebauthn/browser': 11.0.0
-      '@stackframe/stack-sc': 2.8.48(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(next@16.0.1(@babel/core@7.28.5)(@opentelemetry/api@1.9.0)(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
-      '@stackframe/stack-shared': 2.8.48(@aws-sdk/credential-provider-web-identity@3.922.0)(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(yup@1.7.1)
-      '@stackframe/stack-ui': 2.8.48(@aws-sdk/credential-provider-web-identity@3.922.0)(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(yup@1.7.1)
-      '@tanstack/react-table': 8.21.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
-      browser-image-compression: 2.0.2
-      color: 4.2.3
-      cookie: 0.6.0
-      jose: 5.9.6
-      js-cookie: 3.0.5
-      lucide-react: 0.378.0(react@19.2.0)
-      next: 16.0.1(@babel/core@7.28.5)(@opentelemetry/api@1.9.0)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
-      oauth4webapi: 2.17.0
-      qrcode: 1.5.4
-      react: 19.2.0
-      react-dom: 19.2.0(react@19.2.0)
-      react-easy-crop: 5.5.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
-      react-hook-form: 7.66.0(react@19.2.0)
-      rimraf: 5.0.10
-      tailwindcss-animate: 1.0.7(tailwindcss@4.1.16)
-      tsx: 4.19.2
-      yup: 1.7.1
-    optionalDependencies:
-      '@types/react': 19.2.2
-      '@types/react-dom': 19.2.2(@types/react@19.2.2)
-    transitivePeerDependencies:
-      - '@aws-sdk/credential-provider-web-identity'
-      - aws-crt
-      - buffer
-      - tailwindcss
 
   '@swc/helpers@0.5.15':
     dependencies:

@@ -1,4 +1,4 @@
-import { useStackApp, useUser } from '@stackframe/stack';
+import { useStackApp, useUser } from '@stackframe/react';
 
 export default function AuthButton() {
   const stackApp = useStackApp();

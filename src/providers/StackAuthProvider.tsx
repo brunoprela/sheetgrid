@@ -1,30 +1,26 @@
-import { StackProvider, StackClientApp } from '@stackframe/stack';
+import { StackProvider, StackClientApp, StackTheme } from '@stackframe/react';
 import { ReactNode } from 'react';
 
 const projectId = import.meta.env.VITE_STACK_PROJECT_ID;
 const publishableClientKey = import.meta.env.VITE_STACK_PUBLISHABLE_CLIENT_KEY;
 
 if (!projectId || !publishableClientKey) {
-  console.warn('Stack Auth environment variables not set. Auth features may not work.');
+  console.warn('Neon Auth environment variables not set. Auth features may not work.');
 }
 
-const stackApp = new StackClientApp({
+export const stackClientApp = new StackClientApp({
   projectId: projectId || '',
   publishableClientKey: publishableClientKey || '',
-  tokenStore: 'memory',
+  tokenStore: 'cookie',
   redirectMethod: 'window',
-  urls: {
-    signIn: '/sign-in',
-    afterSignIn: '/',
-    afterSignUp: '/',
-    afterSignOut: '/',
-  },
 });
 
 export function StackAuthProvider({ children }: { children: ReactNode }) {
   return (
-    <StackProvider app={stackApp}>
-      {children}
+    <StackProvider app={stackClientApp}>
+      <StackTheme>
+        {children}
+      </StackTheme>
     </StackProvider>
   );
 }
