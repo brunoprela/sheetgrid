@@ -28,19 +28,26 @@ export default function ChatPanel({ }: ChatPanelProps) {
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const availableModels = [
     'anthropic/claude-3-haiku',
-    'openai/gpt-5-nano',
-    'meituan/longcat-flash-chat:free',
-    'google/gemini-2.0-flash-exp:free',
-    'minimax/minimax-m2:free',
   ];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [mcpTools, setMcpTools] = useState<any[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`;
+    }
+  }, [input]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -943,8 +950,20 @@ export default function ChatPanel({ }: ChatPanelProps) {
     }
   };
 
+  const stopMessage = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsLoading(false);
+  };
+
   const sendMessage = async () => {
     if (!input.trim() || isLoading) return;
+
+    // Create new AbortController for this request
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
 
     const userMessage: Message = {
       role: 'user',
@@ -955,11 +974,16 @@ export default function ChatPanel({ }: ChatPanelProps) {
     const updatedMessages = [...messages, userMessage];
     setMessages(updatedMessages);
     setInput('');
+    // Reset textarea height
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
     setIsLoading(true);
 
     try {
       // Call OpenRouter API with tool support
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        signal: abortController.signal,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -997,6 +1021,11 @@ export default function ChatPanel({ }: ChatPanelProps) {
         // Execute all tool calls
         const toolResults: Array<{ name: string; result: string }> = [];
         for (const toolCall of data.choices[0].message.tool_calls) {
+          // Check if request was aborted
+          if (abortController.signal.aborted) {
+            console.log('Request aborted, stopping tool execution');
+            return;
+          }
           console.log('Executing tool:', toolCall.function.name, toolCall.function.arguments);
           const result = await executeTool({
             name: toolCall.function.name,
@@ -1014,8 +1043,15 @@ export default function ChatPanel({ }: ChatPanelProps) {
           content: tr.result,
         }));
 
+        // Check if request was aborted before sending follow-up
+        if (abortController.signal.aborted) {
+          console.log('Request aborted, skipping follow-up request');
+          return;
+        }
+
         // Send the results back to OpenRouter for a final response
         const followUpResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          signal: abortController.signal,
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1047,6 +1083,11 @@ export default function ChatPanel({ }: ChatPanelProps) {
           console.log('Follow-up tool calls:', JSON.stringify(followUpData.choices[0].message.tool_calls, null, 2));
           const followUpToolResults: Array<{ name: string; result: string }> = [];
           for (const toolCall of followUpData.choices[0].message.tool_calls) {
+            // Check if request was aborted
+            if (abortController.signal.aborted) {
+              console.log('Request aborted, stopping follow-up tool execution');
+              return;
+            }
             console.log('Executing follow-up tool:', toolCall.function.name, toolCall.function.arguments);
             const result = await executeTool({
               name: toolCall.function.name,
@@ -1064,7 +1105,14 @@ export default function ChatPanel({ }: ChatPanelProps) {
             content: tr.result,
           }));
 
+          // Check if request was aborted before sending final follow-up
+          if (abortController.signal.aborted) {
+            console.log('Request aborted, skipping final follow-up request');
+            return;
+          }
+
           const finalFollowUpResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            signal: abortController.signal,
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -1113,6 +1161,11 @@ export default function ChatPanel({ }: ChatPanelProps) {
         setMessages((prev) => [...prev, assistantMessage]);
       }
     } catch (error) {
+      // Don't show error message if request was aborted by user
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log('Request was cancelled by user');
+        return;
+      }
       console.error('Chat error:', error);
       const errorMessage: Message = {
         role: 'assistant',
@@ -1122,119 +1175,173 @@ export default function ChatPanel({ }: ChatPanelProps) {
       setMessages((prev) => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
+      abortControllerRef.current = null;
     }
   };
 
   return (
-    <div className="flex flex-col h-full bg-white">
+    <div className="flex flex-col h-full bg-[#FAFAFA]">
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4">
-        {messages
-          .filter((m) => m.role !== 'system')
-          .map((message, idx) => (
-            <div
-              key={idx}
-              className={`flex gap-3 mb-6 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}
-            >
-              {/* Avatar */}
-              <div className={`shrink-0 w-7 h-7 rounded flex items-center justify-center text-xs font-semibold ${message.role === 'user'
-                ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white'
-                : 'bg-gradient-to-br from-gray-100 to-gray-200 text-gray-700'
-                }`}>
-                {message.role === 'user' ? 'U' : 'AI'}
-              </div>
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-3xl mx-auto px-4 py-6">
+          {messages
+            .filter((m) => m.role !== 'system')
+            .map((message, idx) => (
+              <div
+                key={idx}
+                className={`mb-8 ${message.role === 'user' ? 'flex justify-end' : ''}`}
+              >
+                <div className={`flex gap-4 ${message.role === 'user' ? 'flex-row-reverse' : ''} max-w-[85%] ${message.role === 'user' ? 'ml-auto' : ''}`}>
+                  {/* Avatar */}
+                  <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium ${message.role === 'user'
+                    ? 'bg-[#0066CC] text-white'
+                    : 'bg-[#E8E8E8] text-[#666666]'
+                    }`}>
+                    {message.role === 'user' ? 'U' : 'AI'}
+                  </div>
 
-              {/* Message content */}
-              <div className={`flex-1 ${message.role === 'user' ? 'flex justify-end' : ''}`}>
-                <div className="max-w-[85%]">
-                  <p className="text-sm text-gray-900 leading-relaxed whitespace-pre-wrap">
-                    {message.content}
-                  </p>
+                  {/* Message content */}
+                  <div className="flex-1 min-w-0">
+                    <div className={`rounded-lg px-4 py-2.5 ${message.role === 'user'
+                      ? 'bg-[#0066CC] text-white'
+                      : 'bg-white text-[#333333] border border-[#E0E0E0]'
+                      }`}>
+                      <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+                        {message.content}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          {isLoading && (
+            <div className="mb-8">
+              <div className="flex gap-4 max-w-[85%]">
+                <div className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium bg-[#E8E8E8] text-[#666666]">
+                  AI
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="rounded-lg px-4 py-2.5 bg-white border border-[#E0E0E0]">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-1.5 h-1.5 bg-[#999999] rounded-full animate-bounce" style={{ animationDelay: '0s' }} />
+                      <div className="w-1.5 h-1.5 bg-[#999999] rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+                      <div className="w-1.5 h-1.5 bg-[#999999] rounded-full animate-bounce" style={{ animationDelay: '0.4s' }} />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
-          ))}
-        {isLoading && (
-          <div className="flex gap-3 mb-6">
-            <div className="shrink-0 w-7 h-7 rounded flex items-center justify-center text-xs font-semibold bg-gradient-to-br from-gray-100 to-gray-200 text-gray-700">
-              AI
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0s' }} />
-              <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }} />
-              <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
-            </div>
-          </div>
-        )}
-        <div ref={messagesEndRef} />
+          )}
+          <div ref={messagesEndRef} />
+        </div>
       </div>
 
-      {/* Input Area */}
-      <div className="border-t border-gray-200 p-3 bg-white">
-        <div className="relative">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-              }
-            }}
-            placeholder="Ask me to analyze or edit your spreadsheet..."
-            className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900 placeholder-gray-400 bg-white"
-            rows={2}
-            disabled={isLoading}
-          />
-          <button
-            onClick={sendMessage}
-            disabled={isLoading || !input.trim()}
-            className="absolute bottom-2.5 right-2.5 p-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded transition-colors"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 10l7-7m0 0l7 7m-7-7v18" />
-            </svg>
-          </button>
-        </div>
+      {/* Input Area - Cursor-style */}
+      <div className="border-t border-[#E0E0E0] bg-white">
+        <div className="w-full px-4 py-3">
+          {/* Input field */}
+          <div className="mb-2">
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  sendMessage();
+                }
+              }}
+              placeholder="Chat with your AI"
+              className="w-full px-3 py-2 border border-[#D0D0D0] rounded resize-none focus:outline-none focus:ring-1 focus:ring-[#0066CC] focus:border-[#0066CC] text-sm text-[#333333] placeholder-[#999999] bg-white overflow-hidden"
+              style={{ minHeight: '32px', maxHeight: '120px' }}
+              disabled={isLoading}
+            />
+          </div>
 
-        {/* Model selector in footer */}
-        <div className="mt-2 relative" ref={modelDropdownRef}>
-          <button
-            onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
-            className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1"
-          >
-            <span>{selectedModel}</span>
-            <svg
-              className={`w-3 h-3 transition-transform ${isModelDropdownOpen ? 'transform rotate-180' : ''}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-
-          {isModelDropdownOpen && (
-            <div className="absolute z-50 bottom-full mb-2 w-48 bg-white border border-gray-300 rounded-lg shadow-lg max-h-64 overflow-auto">
-              {availableModels.length === 0 ? (
-                <div className="px-3 py-2 text-sm text-gray-500">No models found</div>
-              ) : (
-                availableModels.map((model) => (
-                  <button
-                    key={model}
-                    onClick={() => {
-                      setSelectedModel(model);
-                      setIsModelDropdownOpen(false);
-                    }}
-                    className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-100 transition-colors ${model === selectedModel ? 'bg-blue-50 text-blue-600 font-medium' : 'text-gray-900'
-                      }`}
+          {/* Tools row */}
+          <div className="flex items-center justify-between">
+            {/* Left side - Model selector */}
+            <div className="flex items-center gap-2">
+              <div className="relative" ref={modelDropdownRef}>
+                <button
+                  onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
+                  className="text-xs text-[#666666] hover:text-[#333333] flex items-center gap-1 px-2 py-1 rounded hover:bg-[#F0F0F0] transition-colors font-medium"
+                >
+                  <span>{selectedModel}</span>
+                  <svg
+                    className={`w-3 h-3 transition-transform ${isModelDropdownOpen ? 'transform rotate-180' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    strokeWidth={2}
                   >
-                    {model}
-                  </button>
-                ))
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                {isModelDropdownOpen && (
+                  <div className="absolute z-50 bottom-full mb-2 w-56 bg-white border border-[#D0D0D0] rounded-md shadow-lg max-h-64 overflow-auto">
+                    {availableModels.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-[#999999]">No models found</div>
+                    ) : (
+                      availableModels.map((model) => (
+                        <button
+                          key={model}
+                          onClick={() => {
+                            setSelectedModel(model);
+                            setIsModelDropdownOpen(false);
+                          }}
+                          className={`w-full px-3 py-2 text-left text-sm hover:bg-[#F5F5F5] transition-colors ${model === selectedModel
+                            ? 'bg-[#E6F2FF] text-[#0066CC] font-medium'
+                            : 'text-[#333333]'
+                            }`}
+                        >
+                          {model}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Right side - Action buttons */}
+            <div className="flex items-center gap-1">
+              {/* Upload document button */}
+              <button
+                className="p-1.5 text-[#666666] hover:text-[#333333] hover:bg-[#F0F0F0] rounded transition-colors"
+                title="Upload document"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+              </button>
+
+              {/* Send/Stop button */}
+              {isLoading ? (
+                <button
+                  onClick={stopMessage}
+                  className="p-1.5 text-[#666666] hover:text-[#333333] hover:bg-[#F0F0F0] rounded transition-colors"
+                  title="Stop generating"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <rect x="6" y="6" width="12" height="12" rx="1" />
+                  </svg>
+                </button>
+              ) : (
+                <button
+                  onClick={sendMessage}
+                  disabled={!input.trim()}
+                  className="p-1.5 text-[#0066CC] hover:text-[#0052A3] disabled:text-[#CCCCCC] disabled:cursor-not-allowed transition-colors rounded hover:bg-[#F0F7FF] disabled:hover:bg-transparent"
+                  title="Send message"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                </button>
               )}
             </div>
-          )}
+          </div>
         </div>
       </div>
     </div>
