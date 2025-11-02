@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { loadChatMessages, saveAllChatMessages, updateChat } from '../src/utils/indexeddb';
+import { useUserApiKeys } from '../src/hooks/useUserApiKeys';
 
 interface ChatPanelProps {
   chatId: string;
@@ -26,6 +27,9 @@ interface ToolCall {
 export default function ChatPanel({ chatId, chatTitle, onCreateNewChat, onChatTitleChange, onSelectChat, onDeleteChat, allChats = [] }: ChatPanelProps) {
   // chatTitle is passed from parent but not currently used in this component
   void chatTitle;
+
+  // Get user's API keys
+  const { openRouterKey, univerMcpKey } = useUserApiKeys();
   // System message should not be persisted
   const systemMessage: Message = {
     role: 'system',
@@ -331,7 +335,7 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
   useEffect(() => {
     const fetchMcpTools = async () => {
       try {
-        const apiKey = import.meta.env.VITE_UNIVER_MCP_API_KEY || '';
+        const apiKey = univerMcpKey || import.meta.env.VITE_UNIVER_MCP_API_KEY || '';
         if (!apiKey) {
           console.warn('No MCP API key configured, using local tools only');
           return;
@@ -434,7 +438,7 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
     };
 
     fetchMcpTools();
-  }, []);
+  }, [univerMcpKey]);
 
   // Return only MCP tools from server
   const getTools = () => {
@@ -459,9 +463,9 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
 
     console.log(`Tool "${name}": routing to MCP server`, 'args:', JSON.stringify(args));
 
-    const apiKey = import.meta.env.VITE_UNIVER_MCP_API_KEY || '';
+    const apiKey = univerMcpKey || import.meta.env.VITE_UNIVER_MCP_API_KEY || '';
     if (!apiKey) {
-      return JSON.stringify({ error: 'MCP API key not configured' });
+      return JSON.stringify({ error: 'MCP API key not configured. Please add your Univer MCP API key in your profile settings.' });
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -892,9 +896,9 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
     setIsLoading(true);
 
     try {
-      const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || '';
+      const apiKey = openRouterKey || import.meta.env.VITE_OPENROUTER_API_KEY || '';
       if (!apiKey) {
-        throw new Error('OpenRouter API key is not configured. Please set VITE_OPENROUTER_API_KEY in your .env file.');
+        throw new Error('OpenRouter API key is not configured. Please add your OpenRouter API key in your profile settings.');
       }
 
       // Call OpenRouter API with tool support

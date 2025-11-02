@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { createUniver, LocaleType, UniverInstanceType, LogLevel, defaultTheme } from '@univerjs/presets';
 import { saveWorkbookData as saveWorkbookDataToIndexedDB, loadWorkbookData as loadWorkbookDataFromIndexedDB } from '../src/utils/indexeddb';
+import { useUserApiKeys } from '../src/hooks/useUserApiKeys';
 import { UniverSheetsCorePreset } from '@univerjs/presets/preset-sheets-core';
 import UniverPresetSheetsCoreEnUS from '@univerjs/presets/preset-sheets-core/locales/en-US';
 import { UniverSheetsAdvancedPreset } from '@univerjs/presets/preset-sheets-advanced';
@@ -54,6 +55,7 @@ export default function Spreadsheet({}: SpreadsheetProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const univerInstanceRef = useRef<{ univerAPI: any; univer: any } | null>(null);
   const keyDownHandlerRef = useRef<((e: KeyboardEvent) => void) | null>(null);
+  const { univerMcpKey } = useUserApiKeys();
 
   // Register global keyboard handler early, before Univer initializes
   useEffect(() => {
@@ -181,7 +183,7 @@ export default function Spreadsheet({}: SpreadsheetProps) {
     // Create Univer instance with preset and MCP plugins
     const universerEndpoint = window.location.host;
     const collaboration = undefined;
-    const apiKey = import.meta.env.VITE_UNIVER_MCP_API_KEY || '';
+    const apiKey = univerMcpKey || import.meta.env.VITE_UNIVER_MCP_API_KEY || '';
 
     const { univerAPI, univer } = createUniver({
       locale: LocaleType.EN_US,
