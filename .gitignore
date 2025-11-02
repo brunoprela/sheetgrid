@@ -3,8 +3,10 @@
 # ignore example files
 examples/*.xlsx
 
-# ignore the univer starter kit
+# ignore the univer starter kits
 univer-pro-sheet-start-kit/
+univer-mcp-start-kit/
+univer-server/
 
 # dependencies
 /node_modules

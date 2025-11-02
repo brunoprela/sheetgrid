@@ -53,10 +53,8 @@ export default function ChatPanel({ workbookData, updateCell, setWorkbookData, g
           const modelNames = data.models?.map((model: any) => model.name) || [];
           if (modelNames.length > 0) {
             setAvailableModels(modelNames);
-            // Set the first model as default if current one is not available
-            if (!modelNames.includes(selectedModel)) {
-              setSelectedModel(modelNames[0]);
-            }
+            // Always set the first model as default
+            setSelectedModel(modelNames[0]);
           }
         }
       } catch (error) {
