@@ -1,17 +1,21 @@
 import { useState, useRef, useEffect } from 'react';
+import { useUser, useStackApp } from '@stackframe/stack';
 import Spreadsheet from '@/components/Spreadsheet';
 import ChatPanel from '@/components/ChatPanel';
 import LandingPage from '@/components/LandingPage';
+import SignInPage from '@/components/SignInPage';
+import AuthButton from '@/components/AuthButton';
 import { getAllChats, createChat, deleteChat, type Chat } from './utils/indexeddb';
 
 function App() {
-  // Check if user has seen landing page
-  const [showLanding, setShowLanding] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return !localStorage.getItem('hasSeenLanding');
-    }
-    return true;
-  });
+  const user = useUser();
+  const stackApp = useStackApp();
+  
+  // Track if we should show sign-in page
+  const [showSignIn, setShowSignIn] = useState(false);
+
+  // Show landing page only when user is NOT signed in and not showing sign-in
+  const showLanding = !user && !showSignIn;
 
   // Load saved chat width from localStorage on mount
   const [chatVisible] = useState(true);
@@ -243,18 +247,32 @@ function App() {
   };
 
   const handleGetStarted = () => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('hasSeenLanding', 'true');
-    }
-    setShowLanding(false);
+    // Show sign-in page when button is clicked
+    setShowSignIn(true);
   };
 
-  const handleShowLanding = () => {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('hasSeenLanding');
+  // Allow scrolling on landing/sign-in pages when zoomed, prevent it on main app
+  useEffect(() => {
+    if (showLanding || showSignIn) {
+      document.documentElement.style.overflow = 'auto';
+      document.body.style.overflow = 'auto';
+    } else {
+      document.documentElement.style.overflow = 'hidden';
+      document.body.style.overflow = 'hidden';
     }
-    setShowLanding(true);
-  };
+  }, [showLanding, showSignIn]);
+
+  // Reset sign-in page when user signs in
+  useEffect(() => {
+    if (user && showSignIn) {
+      setShowSignIn(false);
+    }
+  }, [user, showSignIn]);
+
+  // Show sign-in page if we're on that route
+  if (showSignIn) {
+    return <SignInPage />;
+  }
 
   // Show landing page if user hasn't seen it
   if (showLanding) {
@@ -274,12 +292,6 @@ function App() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            onClick={handleShowLanding}
-            className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
-          >
-            About
-          </button>
           <a
             href="https://github.com/brunoprela/sheetgrid"
             target="_blank"
@@ -291,6 +303,7 @@ function App() {
             </svg>
             GitHub
           </a>
+          <AuthButton />
         </div>
       </div>
 

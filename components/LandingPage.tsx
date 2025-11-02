@@ -1,7 +1,10 @@
+import { useStackApp } from '@stackframe/stack';
+
 export default function LandingPage({ onGetStarted }: { onGetStarted: () => void }) {
+  const stackApp = useStackApp();
   return (
-    <div className="flex items-center justify-center min-h-screen bg-white">
-      <div className="max-w-4xl mx-auto px-8 py-16 text-center">
+    <div className="flex items-center justify-center min-h-screen bg-white overflow-y-auto overflow-x-hidden">
+      <div className="max-w-4xl mx-auto px-8 py-16 text-center w-full">
         {/* Logo/Icon */}
         <div className="mb-8 flex justify-center">
           <div className="text-7xl">
@@ -84,18 +87,11 @@ export default function LandingPage({ onGetStarted }: { onGetStarted: () => void
           onClick={onGetStarted}
           className="inline-flex items-center gap-2 px-8 py-4 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-lg hover:shadow-xl transform hover:scale-105 transition-transform"
         >
-          Get Started
+          Sign In to Get Started
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
           </svg>
         </button>
-
-        {/* Footer */}
-        <div className="mt-16 pt-8 border-t border-gray-200">
-          <p className="text-sm text-gray-500">
-            Made with ❤️ for better spreadsheet workflows
-          </p>
-        </div>
       </div>
     </div>
   );

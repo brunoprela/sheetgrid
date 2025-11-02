@@ -11,6 +11,7 @@
     "lint:fix": "eslint . --fix"
   },
   "dependencies": {
+    "@stackframe/stack": "^2.8.48",
     "@univerjs-pro/mcp": "0.10.8",
     "@univerjs-pro/mcp-ui": "0.10.8",
     "@univerjs-pro/sheets-mcp": "0.10.8",
