@@ -6,13 +6,9 @@ import { UniverSheetsCorePreset } from '@univerjs/presets/preset-sheets-core';
 import UniverPresetSheetsCoreEnUS from '@univerjs/presets/preset-sheets-core/locales/en-US';
 import '@univerjs/presets/lib/styles/preset-sheets-core.css';
 
-interface SpreadsheetProps {
-  data?: any[][];
-  onCellUpdate?: (row: number, col: number, value: string) => void;
-  getColumnLetter: (col: number) => string;
-}
+interface SpreadsheetProps {}
 
-export default function Spreadsheet({ data, onCellUpdate, getColumnLetter }: SpreadsheetProps) {
+export default function Spreadsheet({}: SpreadsheetProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

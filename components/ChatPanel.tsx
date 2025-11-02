@@ -31,11 +31,61 @@ export default function ChatPanel({ workbookData, updateCell, setWorkbookData, g
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedModel, setSelectedModel] = useState('llama3.2');
+  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
+  const [availableModels, setAvailableModels] = useState<string[]>(['llama3.2']);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const modelDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Fetch available models from Ollama on mount
+  useEffect(() => {
+    const fetchModels = async () => {
+      setIsLoadingModels(true);
+      try {
+        const response = await fetch('http://localhost:11434/api/tags');
+        if (response.ok) {
+          const data = await response.json();
+          const modelNames = data.models?.map((model: any) => model.name) || [];
+          if (modelNames.length > 0) {
+            setAvailableModels(modelNames);
+            // Set the first model as default if current one is not available
+            if (!modelNames.includes(selectedModel)) {
+              setSelectedModel(modelNames[0]);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch Ollama models:', error);
+        // Keep the default model if fetch fails
+      } finally {
+        setIsLoadingModels(false);
+      }
+    };
+
+    fetchModels();
+  }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (modelDropdownRef.current && !modelDropdownRef.current.contains(event.target as Node)) {
+        setIsModelDropdownOpen(false);
+      }
+    };
+
+    if (isModelDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isModelDropdownOpen]);
 
   // Tool definitions for Ollama
   const getTools = () => [
@@ -197,7 +247,7 @@ export default function ChatPanel({ workbookData, updateCell, setWorkbookData, g
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'llama3.2',
+          model: selectedModel,
           messages: updatedMessages.filter(m => m.role !== 'system').map((m) => ({ role: m.role, content: m.content })),
           tools: getTools(),
           tool_choice: 'auto',
@@ -244,7 +294,7 @@ export default function ChatPanel({ workbookData, updateCell, setWorkbookData, g
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            model: 'llama3.2',
+            model: selectedModel,
             messages: [
               ...updatedMessages.filter(m => m.role !== 'system').map((m) => ({ role: m.role, content: m.content })),
               { role: 'assistant', content: data.message.content },
@@ -286,40 +336,42 @@ export default function ChatPanel({ workbookData, updateCell, setWorkbookData, g
   return (
     <div className="flex flex-col h-full bg-white">
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      <div className="flex-1 overflow-y-auto p-4">
         {messages
           .filter((m) => m.role !== 'system')
           .map((message, idx) => (
             <div
               key={idx}
-              className={`flex gap-4 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}
+              className={`flex gap-3 mb-6 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}
             >
               {/* Avatar */}
-              <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+              <div className={`shrink-0 w-7 h-7 rounded flex items-center justify-center text-xs font-semibold ${
                 message.role === 'user' 
-                  ? 'bg-blue-600 text-white' 
-                  : 'bg-gray-200 text-gray-600'
+                  ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white' 
+                  : 'bg-gradient-to-br from-gray-100 to-gray-200 text-gray-700'
               }`}>
                 {message.role === 'user' ? 'U' : 'AI'}
               </div>
 
               {/* Message content */}
-              <div className="flex-1">
-                <p className="text-sm text-gray-900 leading-relaxed whitespace-pre-wrap">
-                  {message.content}
-                </p>
+              <div className={`flex-1 ${message.role === 'user' ? 'flex justify-end' : ''}`}>
+                <div className="max-w-[85%]">
+                  <p className="text-sm text-gray-900 leading-relaxed whitespace-pre-wrap">
+                    {message.content}
+                  </p>
+                </div>
               </div>
             </div>
           ))}
         {isLoading && (
-          <div className="flex gap-4">
-            <div className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium bg-gray-200 text-gray-600">
+          <div className="flex gap-3 mb-6">
+            <div className="shrink-0 w-7 h-7 rounded flex items-center justify-center text-xs font-semibold bg-gradient-to-br from-gray-100 to-gray-200 text-gray-700">
               AI
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0s' }} />
-              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
-              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }} />
+            <div className="flex items-center gap-1">
+              <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0s' }} />
+              <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }} />
+              <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
             </div>
           </div>
         )}
@@ -327,7 +379,7 @@ export default function ChatPanel({ workbookData, updateCell, setWorkbookData, g
       </div>
 
       {/* Input Area */}
-      <div className="border-t border-gray-200 p-4 bg-white">
+      <div className="border-t border-gray-200 p-3 bg-white">
         <div className="relative">
           <textarea
             value={input}
@@ -339,19 +391,62 @@ export default function ChatPanel({ workbookData, updateCell, setWorkbookData, g
               }
             }}
             placeholder="Ask me to analyze or edit your spreadsheet..."
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-gray-900 placeholder-gray-500"
-            rows={4}
+            className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900 placeholder-gray-400 bg-white"
+            rows={2}
             disabled={isLoading}
           />
           <button
             onClick={sendMessage}
             disabled={isLoading || !input.trim()}
-            className="absolute bottom-3 right-3 p-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded transition-colors"
+            className="absolute bottom-2.5 right-2.5 p-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded transition-colors"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 10l7-7m0 0l7 7m-7-7v18" />
             </svg>
           </button>
+        </div>
+        
+        {/* Model selector in footer */}
+        <div className="mt-2 relative" ref={modelDropdownRef}>
+          <button
+            onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
+            className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1"
+          >
+            <span>{selectedModel}</span>
+            <svg
+              className={`w-3 h-3 transition-transform ${isModelDropdownOpen ? 'transform rotate-180' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          
+          {isModelDropdownOpen && (
+            <div className="absolute z-50 bottom-full mb-2 w-48 bg-white border border-gray-300 rounded-lg shadow-lg max-h-64 overflow-auto">
+              {isLoadingModels ? (
+                <div className="px-3 py-2 text-sm text-gray-500">Loading models...</div>
+              ) : availableModels.length === 0 ? (
+                <div className="px-3 py-2 text-sm text-gray-500">No models found</div>
+              ) : (
+                availableModels.map((model) => (
+                  <button
+                    key={model}
+                    onClick={() => {
+                      setSelectedModel(model);
+                      setIsModelDropdownOpen(false);
+                    }}
+                    className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-100 transition-colors ${
+                      model === selectedModel ? 'bg-blue-50 text-blue-600 font-medium' : 'text-gray-900'
+                    }`}
+                  >
+                    {model}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
