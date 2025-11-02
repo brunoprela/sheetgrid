@@ -1,0 +1,6 @@
+examples/
+*.xlsx
+README.md
+.git
+.gitignore
+

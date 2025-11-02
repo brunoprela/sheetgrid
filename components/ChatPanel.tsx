@@ -49,8 +49,32 @@ IMPORTANT RULES:
    - Make multiple tool calls if needed to complete the full range - never leave partial data
 6. Always complete the ENTIRE task before responding - partial completion is not acceptable
 
+CALCULATIONS AND NUMERIC OPERATIONS:
+- When asked to calculate totals, sums, averages, or perform arithmetic operations:
+  - Use get_range or get_range_data to retrieve the relevant numeric data
+  - Parse formatted numbers from spreadsheet data (remove commas, spaces, handle parentheses as negatives)
+  - Example: " 146,493 " → 146493, " (13,306)" → -13306, " -   " → 0
+  - Perform the calculation yourself (sum, average, etc.)
+  - Return the result directly with a clear answer
+  - DO NOT just retrieve a single cell - you must process all the data and calculate
+- When you receive range data, parse ALL numeric values and calculate based on the user's request
+- Format your final answer clearly: "The total revenue is $X,XXX" or "The sum is XXX"
+- IMPORTANT: When you receive tool results with data in markdown format like:
+  "- Row 2
+    - H2: v= 146,493 ;
+  - Row 3
+    - H3: v= (13,306);"
+  You MUST:
+  1. Extract ALL numeric values from ALL rows (skip header row with "Revenue", "Gross Profit", etc.)
+  2. Parse each value: remove spaces, remove commas, treat parentheses as negative signs
+  3. Convert each to a number: " 146,493 " becomes 146493, " (13,306)" becomes -13306, " -   " becomes 0
+  4. Sum ALL the numeric values (excluding the header row)
+  5. Return the final calculation: "The total revenue of all rows is $X,XXX,XXX"
+- DO NOT respond with "Operations completed successfully" when asked for a calculation - you MUST provide the actual calculated result
+
 Example of good response: "I've created a Date column with all dates from November 1 to November 30, 2025."
-Example of bad response: "I set the first 5 dates, you can use auto_fill to extend the rest..."`,
+Example of bad response: "I set the first 5 dates, you can use auto_fill to extend the rest..."
+Example of calculation response: "The total revenue of all rows is $542,893."`,
     timestamp: new Date(),
   };
 
@@ -410,359 +434,14 @@ Example of bad response: "I set the first 5 dates, you can use auto_fill to exte
     fetchMcpTools();
   }, []);
 
-  // Tool definitions for OpenRouter
+  // Return only MCP tools from server
   const getTools = () => {
-    const tools = [
-      {
-        type: 'function',
-        function: {
-          name: 'get_cell_value',
-          description: 'Get the value of a specific cell in the active sheet. Row and column are 0-indexed.',
-          parameters: {
-            type: 'object',
-            properties: {
-              row: { type: 'number', description: 'Row index (0-based)' },
-              col: { type: 'number', description: 'Column index (0-based)' },
-            },
-            required: ['row', 'col'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'set_cell_value',
-          description: 'Set the value of a specific cell in a sheet. Row and column are 0-indexed.',
-          parameters: {
-            type: 'object',
-            properties: {
-              row: { type: 'number', description: 'Row index (0-based)' },
-              col: { type: 'number', description: 'Column index (0-based)' },
-              value: { type: 'string', description: 'The value to set' },
-              sheetName: { type: 'string', description: 'Optional sheet name. Defaults to active sheet.' },
-            },
-            required: ['row', 'col', 'value'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'get_range',
-          description: 'Get a range of cells from a sheet',
-          parameters: {
-            type: 'object',
-            properties: {
-              startRow: { type: 'number', description: 'Start row index (0-based)' },
-              endRow: { type: 'number', description: 'End row index (0-based)' },
-              startCol: { type: 'number', description: 'Start column index (0-based)' },
-              endCol: { type: 'number', description: 'End column index (0-based)' },
-              sheetName: { type: 'string', description: 'Optional sheet name. Defaults to active sheet.' },
-            },
-            required: ['startRow', 'endRow', 'startCol', 'endCol'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'set_range',
-          description: 'Set a range of cells with values',
-          parameters: {
-            type: 'object',
-            properties: {
-              startRow: { type: 'number', description: 'Start row index (0-based)' },
-              values: {
-                type: 'array',
-                items: {
-                  type: 'array',
-                  items: { type: 'string' },
-                },
-                description: '2D array of values to set',
-              },
-              sheetName: { type: 'string', description: 'Optional sheet name. Defaults to active sheet.' },
-            },
-            required: ['startRow', 'values'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'set_column_header',
-          description: 'Set the header value for a specific column. Use this to add or rename column headers. Column is 0-indexed (A=0, B=1, etc).',
-          parameters: {
-            type: 'object',
-            properties: {
-              col: { type: 'number', description: 'Column index (0-based, where A=0, B=1, etc)' },
-              value: { type: 'string', description: 'The header value to set' },
-              sheetName: { type: 'string', description: 'Optional sheet name. Defaults to active sheet.' },
-            },
-            required: ['col', 'value'],
-          },
-        },
-      },
-      // MCP Tools - Data Operations
-      {
-        type: 'function',
-        function: {
-          name: 'set_range_data',
-          description: 'Set values in a cell range. IMPORTANT: Use this to fill ENTIRE ranges completely. If the user requests 30 dates, provide all 30 values in the values array. Never provide partial data - always complete the full requested range.',
-          parameters: {
-            type: 'object',
-            properties: {
-              startRow: { type: 'number' },
-              startCol: { type: 'number' },
-              endRow: { type: 'number' },
-              endCol: { type: 'number' },
-              values: { type: 'array', items: { type: 'array', items: { type: 'string' } } },
-              unitId: { type: 'string', description: 'Workbook ID. Optional, defaults to active workbook.' },
-              subUnitId: { type: 'string', description: 'Sheet ID. Optional, defaults to active sheet.' },
-            },
-            required: ['startRow', 'startCol', 'endRow', 'endCol', 'values'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'get_range_data',
-          description: 'Read cell values and data',
-          parameters: {
-            type: 'object',
-            properties: {
-              startRow: { type: 'number' },
-              startCol: { type: 'number' },
-              endRow: { type: 'number' },
-              endCol: { type: 'number' },
-              unitId: { type: 'string', description: 'Workbook ID. Optional, defaults to active workbook.' },
-              subUnitId: { type: 'string', description: 'Sheet ID. Optional, defaults to active sheet.' },
-            },
-            required: ['startRow', 'startCol', 'endRow', 'endCol'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'search_cells',
-          description: 'Search for specific content in cells',
-          parameters: {
-            type: 'object',
-            properties: {
-              text: { type: 'string' },
-              caseSensitive: { type: 'boolean', description: 'Optional' },
-              unitId: { type: 'string', description: 'Workbook ID. Optional, defaults to active workbook.' },
-            },
-            required: ['text'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'auto_fill',
-          description: 'Auto-fill data patterns',
-          parameters: {
-            type: 'object',
-            properties: {
-              sourceRange: { type: 'object', description: 'Source range object' },
-              targetRange: { type: 'object', description: 'Target range object' },
-              unitId: { type: 'string', description: 'Workbook ID. Optional, defaults to active workbook.' },
-              subUnitId: { type: 'string', description: 'Sheet ID. Optional, defaults to active sheet.' },
-            },
-            required: ['sourceRange', 'targetRange'],
-          },
-        },
-      },
-      // MCP Tools - Sheet Management
-      {
-        type: 'function',
-        function: {
-          name: 'create_sheet',
-          description: 'Create new worksheets',
-          parameters: {
-            type: 'object',
-            properties: {
-              name: { type: 'string' },
-              unitId: { type: 'string', description: 'Workbook ID. Optional, defaults to active workbook.' },
-            },
-            required: ['name'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'delete_sheet',
-          description: 'Remove worksheets',
-          parameters: {
-            type: 'object',
-            properties: {
-              subUnitId: { type: 'string', description: 'Sheet ID or name' },
-              unitId: { type: 'string', description: 'Workbook ID. Optional, defaults to active workbook.' },
-            },
-            required: ['subUnitId'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'rename_sheet',
-          description: 'Rename existing sheets',
-          parameters: {
-            type: 'object',
-            properties: {
-              subUnitId: { type: 'string', description: 'Sheet ID' },
-              name: { type: 'string' },
-              unitId: { type: 'string', description: 'Workbook ID. Optional, defaults to active workbook.' },
-            },
-            required: ['subUnitId', 'name'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'activate_sheet',
-          description: 'Switch active worksheet',
-          parameters: {
-            type: 'object',
-            properties: {
-              subUnitId: { type: 'string', description: 'Sheet ID or name' },
-              unitId: { type: 'string', description: 'Workbook ID. Optional, defaults to active workbook.' },
-            },
-            required: ['subUnitId'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'get_sheets',
-          description: 'List all sheets',
-          parameters: {
-            type: 'object',
-            properties: {
-              unitId: { type: 'string', description: 'Workbook ID. Optional, defaults to active workbook.' },
-            },
-            required: [],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'get_active_unit_id',
-          description: 'Get current workbook ID',
-          parameters: {
-            type: 'object',
-            properties: {},
-            required: [],
-          },
-        },
-      },
-      // MCP Tools - Structure Operations
-      {
-        type: 'function',
-        function: {
-          name: 'insert_rows',
-          description: 'Add rows',
-          parameters: {
-            type: 'object',
-            properties: {
-              startRow: { type: 'number' },
-              count: { type: 'number' },
-              unitId: { type: 'string', description: 'Workbook ID. Optional, defaults to active workbook.' },
-              subUnitId: { type: 'string', description: 'Sheet ID. Optional, defaults to active sheet.' },
-            },
-            required: ['startRow', 'count'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'insert_columns',
-          description: 'Add columns',
-          parameters: {
-            type: 'object',
-            properties: {
-              startCol: { type: 'number' },
-              count: { type: 'number' },
-              unitId: { type: 'string', description: 'Workbook ID. Optional, defaults to active workbook.' },
-              subUnitId: { type: 'string', description: 'Sheet ID. Optional, defaults to active sheet.' },
-            },
-            required: ['startCol', 'count'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'delete_rows',
-          description: 'Remove rows',
-          parameters: {
-            type: 'object',
-            properties: {
-              startRow: { type: 'number' },
-              count: { type: 'number' },
-              unitId: { type: 'string', description: 'Workbook ID. Optional, defaults to active workbook.' },
-              subUnitId: { type: 'string', description: 'Sheet ID. Optional, defaults to active sheet.' },
-            },
-            required: ['startRow', 'count'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'delete_columns',
-          description: 'Remove columns',
-          parameters: {
-            type: 'object',
-            properties: {
-              startCol: { type: 'number' },
-              count: { type: 'number' },
-              unitId: { type: 'string', description: 'Workbook ID. Optional, defaults to active workbook.' },
-              subUnitId: { type: 'string', description: 'Sheet ID. Optional, defaults to active sheet.' },
-            },
-            required: ['startCol', 'count'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'set_merge',
-          description: 'Merge cell ranges',
-          parameters: {
-            type: 'object',
-            properties: {
-              startRow: { type: 'number' },
-              startCol: { type: 'number' },
-              endRow: { type: 'number' },
-              endCol: { type: 'number' },
-              unitId: { type: 'string', description: 'Workbook ID. Optional, defaults to active workbook.' },
-              subUnitId: { type: 'string', description: 'Sheet ID. Optional, defaults to active sheet.' },
-            },
-            required: ['startRow', 'startCol', 'endRow', 'endCol'],
-          },
-        },
-      },
-    ];
-
-    // Merge MCP tools from server (they take priority over local tools with same name)
-    const toolMap = new Map(tools.map(t => [t.function.name, t]));
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mcpTools.forEach((mcpTool: any) => {
-      toolMap.set(mcpTool.function.name, mcpTool);
-    });
-
-    const mergedTools = Array.from(toolMap.values());
-    console.log(`getTools: returning ${mergedTools.length} tools (${mcpTools.length} from MCP, ${tools.length} local)`);
-    return mergedTools;
+    if (mcpTools.length === 0) {
+      console.warn('No MCP tools available yet. Make sure the MCP API key is configured.');
+      return [];
+    }
+    console.log(`getTools: returning ${mcpTools.length} tools from MCP server`);
+    return mcpTools;
   };
 
   const executeTool = async (toolCall: ToolCall): Promise<string> => {
@@ -772,617 +451,105 @@ Example of bad response: "I set the first 5 dates, you can use auto_fill to exte
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const isMcpTool = mcpTools.some((tool: any) => tool.function.name === name);
 
-    // For set_range_data, check if args contain code instead of actual values
-    // If so, use local implementation to convert code to values
-    let shouldUseLocal = false;
-    if (name === 'set_range_data') {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const itemsStr = (args as any).items;
-      if (typeof itemsStr === 'string') {
-        // Check if it contains code (JavaScript or Python)
-        if (itemsStr.includes('Math.random') || itemsStr.includes('Math.round') || itemsStr.includes('Math.floor') ||
-          itemsStr.includes('for i in range') || itemsStr.includes('random()')) {
-          console.log('set_range_data: Detected code in arguments, using local implementation to convert');
-          shouldUseLocal = true;
-        }
-      }
+    if (!isMcpTool) {
+      return JSON.stringify({ error: `Tool "${name}" is not available. Only MCP server tools are supported.` });
     }
 
-    console.log(`Tool "${name}": ${isMcpTool && !shouldUseLocal ? 'routing to MCP server' : 'using local implementation'}`, 'args:', JSON.stringify(args));
+    console.log(`Tool "${name}": routing to MCP server`, 'args:', JSON.stringify(args));
 
-    if (isMcpTool && !shouldUseLocal) {
-      try {
-        const apiKey = import.meta.env.VITE_UNIVER_MCP_API_KEY || '';
-        if (!apiKey) {
-          return JSON.stringify({ error: 'MCP API key not configured' });
-        }
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const sessionId = (window as any).univerSessionId || 'default';
-
-        const response = await fetch(`https://mcp.univer.ai/mcp/?univer_session_id=${sessionId}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-            'Accept': 'application/json, text/event-stream',
-          },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            id: Date.now(),
-            method: 'tools/call',
-            params: {
-              name: name,
-              arguments: args,
-            },
-          }),
-        });
-
-        if (!response.ok) {
-          try {
-            const errorText = await response.text();
-            // Try to parse as SSE first
-            let errorData;
-            if (errorText.includes('data: ')) {
-              const lines = errorText.split('\n');
-              for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                  errorData = JSON.parse(line.substring(6));
-                  break;
-                }
-              }
-            } else {
-              errorData = JSON.parse(errorText);
-            }
-            throw new Error(`MCP tool execution failed: ${errorData.error?.message || 'Unknown error'}`);
-          } catch {
-            throw new Error(`MCP tool execution failed: ${response.status} ${response.statusText}`);
-          }
-        }
-
-        // Check if response is SSE (text/event-stream) or JSON
-        const contentType = response.headers.get('content-type') || '';
-        let data;
-
-        if (contentType.includes('text/event-stream')) {
-          // Parse SSE stream
-          const text = await response.text();
-          const lines = text.split('\n');
-          let jsonData = '';
-          for (let i = 0; i < lines.length; i++) {
-            if (lines[i].startsWith('data: ')) {
-              jsonData = lines[i].substring(6); // Remove 'data: ' prefix
-              break;
-            }
-          }
-
-          if (jsonData) {
-            data = JSON.parse(jsonData);
-          } else {
-            // Try to find JSON in the response
-            const jsonMatch = text.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-              data = JSON.parse(jsonMatch[0]);
-            } else {
-              throw new Error('No JSON data found in SSE response');
-            }
-          }
-        } else {
-          // Regular JSON response
-          data = await response.json();
-        }
-
-        // MCP tools/call returns { result: { content: [...] } }
-        if (data.result && data.result.content) {
-          const content = data.result.content;
-          // Content is an array, extract text
-          if (Array.isArray(content) && content.length > 0) {
-            return content[0].text || JSON.stringify(content[0]);
-          }
-          return JSON.stringify(content);
-        }
-        return JSON.stringify(data.result || { success: true });
-      } catch (error) {
-        return JSON.stringify({ error: `MCP tool execution failed: ${error}` });
-      }
+    const apiKey = import.meta.env.VITE_UNIVER_MCP_API_KEY || '';
+    if (!apiKey) {
+      return JSON.stringify({ error: 'MCP API key not configured' });
     }
 
-    // Local tool implementations (fallback)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sessionId = (window as any).univerSessionId || 'default';
+
     try {
-      // Access Univer API from window
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const univerAPI = (window as any).univerAPI;
-      if (!univerAPI) {
-        console.error('Tool execution failed: Univer API not available');
-        return JSON.stringify({ error: 'Univer API not available yet. Please wait for the spreadsheet to load.' });
-      }
+      const response = await fetch(`https://mcp.univer.ai/mcp/?univer_session_id=${sessionId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+          'Accept': 'application/json, text/event-stream',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: Date.now(),
+          method: 'tools/call',
+          params: {
+            name: name,
+            arguments: args,
+          },
+        }),
+      });
 
-      const workbook = univerAPI.getActiveWorkbook();
-      if (!workbook) {
-        console.error('Tool execution failed: No active workbook');
-        return JSON.stringify({ error: 'No active workbook found. Please ensure a spreadsheet is loaded.' });
-      }
-
-      const activeSheet = workbook.getActiveSheet();
-      if (!activeSheet) {
-        console.error('Tool execution failed: No active sheet');
-        return JSON.stringify({ error: 'No active sheet found. Please ensure a sheet is active.' });
-      }
-
-      // Log the actual sheet name for debugging
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const sheetId = (activeSheet as any).getSheetId?.();
-        const sheets = workbook.getSheets();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const foundSheet = sheets.find((s: any) => s.getSheetId?.() === sheetId);
-        if (foundSheet) {
-          const sheetName = typeof foundSheet.getName === 'function' ? foundSheet.getName() : 'Sheet1';
-          console.log(`Tool executing on sheet: "${sheetName}" (ID: ${sheetId})`);
-        }
-      } catch (e) {
-        console.warn('Could not log sheet name:', e);
-      }
-
-      // Helper to get column letter
-      const getColLetter = (col: number): string => {
-        let result = '';
-        let num = col;
-        while (num >= 0) {
-          result = String.fromCharCode(65 + (num % 26)) + result;
-          num = Math.floor(num / 26) - 1;
-        }
-        return result;
-      };
-
-      switch (name) {
-        case 'get_cell_value': {
-          const row = args.row as number;
-          const col = args.col as number;
-          const worksheet = workbook.getActiveSheet();
-          const range = worksheet.getRange(row, col);
-          const value = range.getValue();
-          return JSON.stringify({
-            value: value,
-            cell: `${getColLetter(col)}${row + 1}`
-          });
-        }
-
-        case 'set_cell_value': {
-          const row = args.row as number;
-          const col = args.col as number;
-          const value = args.value as string;
-          const worksheet = workbook.getActiveSheet();
-          const range = worksheet.getRange(row, col);
-          range.setValue(value);
-          return JSON.stringify({
-            success: true,
-            cell: `${getColLetter(col)}${row + 1}`
-          });
-        }
-
-        case 'get_range': {
-          const startRow = args.startRow as number;
-          const endRow = args.endRow as number;
-          const startCol = args.startCol as number;
-          const endCol = args.endCol as number;
-          const worksheet = workbook.getActiveSheet();
-          const range = worksheet.getRange(startRow, startCol, endRow, endCol);
-          const values = range.getValues();
-          return JSON.stringify({ range: values });
-        }
-
-        case 'set_range': {
-          try {
-            const startRow = args.startRow as number;
-            const values = args.values as string[][];
-            console.log('set_range called with:', { startRow, valuesLength: values.length, firstValue: values[0] });
-            const worksheet = workbook.getActiveSheet();
-            // If startRow is 0, assume row 0 is a header, so start from row 1 instead
-            const actualStartRow = startRow === 0 ? 1 : startRow;
-            console.log('Using actualStartRow:', actualStartRow, 'EndRow:', actualStartRow + values.length - 1);
-
-            // Set values cell by cell instead of using setValues
-            for (let i = 0; i < values.length; i++) {
-              const row = actualStartRow + i;
-              for (let j = 0; j < values[i].length; j++) {
-                const col = j;
-                const value = values[i][j];
-                const cellRange = worksheet.getRange(row, col);
-                cellRange.setValue(value);
+      if (!response.ok) {
+        try {
+          const errorText = await response.text();
+          // Try to parse as SSE first
+          let errorData;
+          if (errorText.includes('data: ')) {
+            const lines = errorText.split('\n');
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                errorData = JSON.parse(line.substring(6));
+                break;
               }
             }
-
-            console.log('Values set successfully (cell by cell)');
-            return JSON.stringify({ success: true });
-          } catch (err) {
-            console.error('set_range error:', err);
-            return JSON.stringify({ error: `set_range failed: ${err}` });
+          } else {
+            errorData = JSON.parse(errorText);
           }
+          throw new Error(`MCP tool execution failed: ${errorData.error?.message || 'Unknown error'}`);
+        } catch {
+          throw new Error(`MCP tool execution failed: ${response.status} ${response.statusText}`);
         }
-
-        case 'set_column_header': {
-          const col = args.col as number;
-          const value = args.value as string;
-          const worksheet = workbook.getActiveSheet();
-          // Set the header in row 0 (first row)
-          const range = worksheet.getRange(0, col);
-          range.setValue(value);
-          return JSON.stringify({
-            success: true,
-            column: getColLetter(col)
-          });
-        }
-
-        // MCP Tools - Data Operations
-        case 'set_range_data': {
-          try {
-            // Handle both MCP server format (items) and local format (startRow, startCol, etc.)
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            let startRow: number, startCol: number, endRow: number, endCol: number, values: any;
-
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            if ((args as any).items) {
-              // MCP server format: { items: "[{ range: 'B1:B30', value: [...] }]" }
-              console.log('set_range_data: Detected MCP format with items parameter');
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              let itemsData = (args as any).items;
-
-              // Parse items if it's a string
-              if (typeof itemsData === 'string') {
-                try {
-                  // The JSON string contains unquoted JavaScript code like:
-                  // "value": [Math.floor(Math.random() * 1001), ...]
-                  // We need to quote these code strings first, then replace with numbers
-
-                  // Find all unquoted Math.random expressions and quote them
-                  // Pattern matches: Math.floor(Math.random() * 1001) or Math.round(Math.random() * 1000)
-                  const codePattern = /(Math\.(floor|round|random)\(Math\.random\(\)\s*\*\s*\d+\))/g;
-                  let placeholderCounter = 0;
-                  const placeholderMap = new Map<string, number>();
-
-                  const cleanedString = itemsData.replace(codePattern, (match) => {
-                    // Check if already processed
-                    if (!placeholderMap.has(match)) {
-                      placeholderMap.set(match, placeholderCounter++);
-                    }
-                    // Return quoted placeholder that we can identify
-                    return `"__RANDOM_${placeholderMap.get(match)}__"`;
-                  });
-
-                  // Parse the cleaned JSON (now all values are properly quoted)
-                  itemsData = JSON.parse(cleanedString);
-
-                  // Now replace placeholders with actual random numbers recursively
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  const replaceRandomNumbers = (obj: any): any => {
-                    if (Array.isArray(obj)) {
-                      return obj.map((item) => {
-                        // Check for placeholder strings like "__RANDOM_0__"
-                        if (typeof item === 'string' && item.startsWith('__RANDOM_') && item.endsWith('__')) {
-                          return Math.floor(Math.random() * 1001);
-                        } else if (typeof item === 'object' && item !== null) {
-                          return replaceRandomNumbers(item);
-                        }
-                        // Check if item is a string containing code
-                        if (typeof item === 'string' && (
-                          item.includes('Math.floor') ||
-                          item.includes('Math.round') ||
-                          item.includes('Math.random')
-                        )) {
-                          return Math.floor(Math.random() * 1001);
-                        }
-                        return item;
-                      });
-                    } else if (typeof obj === 'object' && obj !== null) {
-                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      const result: any = {};
-                      for (const key in obj) {
-                        if (typeof obj[key] === 'string' && obj[key].startsWith('__RANDOM_') && obj[key].endsWith('__')) {
-                          result[key] = Math.floor(Math.random() * 1001);
-                        } else if (typeof obj[key] === 'string' && (
-                          obj[key].includes('Math.floor') ||
-                          obj[key].includes('Math.round') ||
-                          obj[key].includes('Math.random')
-                        )) {
-                          result[key] = Math.floor(Math.random() * 1001);
-                        } else if (Array.isArray(obj[key]) || (typeof obj[key] === 'object' && obj[key] !== null)) {
-                          result[key] = replaceRandomNumbers(obj[key]);
-                        } else {
-                          result[key] = obj[key];
-                        }
-                      }
-                      return result;
-                    }
-                    return obj;
-                  };
-
-                  itemsData = replaceRandomNumbers(itemsData);
-                } catch (e) {
-                  console.error('Failed to parse items:', e, 'Original string:', itemsData.substring(0, 200));
-                  return JSON.stringify({ error: `Failed to parse items: ${e}` });
-                }
-              }
-
-              // Handle array of items
-              if (Array.isArray(itemsData) && itemsData.length > 0) {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const item = itemsData[0] as any;
-
-                // Parse range like "B1:B30"
-                if (item.range) {
-                  const rangeMatch = item.range.match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/);
-                  if (!rangeMatch) {
-                    return JSON.stringify({ error: `Invalid range format: ${item.range}. Expected format: A1:B30` });
-                  }
-
-                  // Convert column letters to numbers
-                  const colToNum = (col: string): number => {
-                    let num = 0;
-                    for (let i = 0; i < col.length; i++) {
-                      num = num * 26 + (col.charCodeAt(i) - 64);
-                    }
-                    return num - 1; // 0-indexed
-                  };
-
-                  startCol = colToNum(rangeMatch[1]);
-                  startRow = parseInt(rangeMatch[2], 10) - 1; // 0-indexed
-                  endCol = colToNum(rangeMatch[3]);
-                  endRow = parseInt(rangeMatch[4], 10) - 1; // 0-indexed
-
-                  // Get values array
-                  values = item.value || item.values;
-
-                  // Filter out any JavaScript/Python code strings and convert to numbers
-                  if (Array.isArray(values)) {
-                    values = values.map((v) => {
-                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      const val = v as any;
-                      // If it's a string that looks like code, generate random number
-                      if (typeof val === 'string' && (
-                        val.includes('Math.floor') ||
-                        val.includes('Math.random') ||
-                        val.includes('Math.round') ||
-                        val.includes('random()') ||
-                        val.includes('for i in range')
-                      )) {
-                        // Generate actual random number instead (0-1000)
-                        return Math.floor(Math.random() * 1001);
-                      }
-                      // Convert to number if possible
-                      const num = Number(val);
-                      return isNaN(num) ? val : num;
-                    });
-                  }
-
-                  // If values is a string containing Python list comprehension, generate the array
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  if (typeof (item as any).value === 'string' &&
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    (item as any).value.includes('for i in range')) {
-                    // Extract the count from "for i in range(30)"
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    const rangeMatch = (item as any).value.match(/range\((\d+)\)/);
-                    if (rangeMatch) {
-                      const count = parseInt(rangeMatch[1], 10);
-                      values = Array.from({ length: count }, () => Math.floor(Math.random() * 1001));
-                      console.log(`Generated ${count} random numbers (0-1000) from Python list comprehension`);
-                    }
-                  }
-                } else {
-                  return JSON.stringify({ error: 'Items format missing range' });
-                }
-              } else {
-                return JSON.stringify({ error: 'Items must be a non-empty array' });
-              }
-            } else {
-              // Local format: { startRow, startCol, endRow, endCol, values }
-              startRow = args.startRow as number;
-              startCol = args.startCol as number;
-              endRow = args.endRow as number;
-              endCol = args.endCol as number;
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              values = args.values as any;
-            }
-
-            console.log('set_range_data called with:', { startRow, startCol, endRow, endCol, valuesLength: values?.length, firstValue: values?.[0] });
-            const worksheet = workbook.getActiveSheet();
-            // If startRow is 0, assume row 0 is a header, so start from row 1 instead
-            const actualStartRow = startRow === 0 ? 1 : startRow;
-            const actualEndRow = actualStartRow + values.length - 1;
-
-            // Ensure values is a 2D array
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const values2D: string[][] = Array.isArray(values[0]) ? values : values.map((v: any) => [String(v)]);
-            console.log('Using actualStartRow:', actualStartRow, 'actualEndRow:', actualEndRow, 'rows:', values2D.length);
-
-            // Set values row by row to ensure they persist
-            for (let i = 0; i < values2D.length; i++) {
-              const row = actualStartRow + i;
-              const rowValues = values2D[i];
-              for (let j = 0; j < rowValues.length; j++) {
-                const col = startCol + j;
-                if (col <= endCol) {
-                  const cellRange = worksheet.getRange(row, col);
-                  cellRange.setValue(rowValues[j]);
-                }
-              }
-            }
-
-            console.log('Values set cell-by-cell, verifying...');
-            // Verify by reading back a few cells
-            const verifyRange = worksheet.getRange(actualStartRow, startCol, Math.min(actualStartRow + 2, actualEndRow), endCol);
-            const readBack = verifyRange.getValues();
-            console.log('Read back from spreadsheet:', readBack);
-            console.log('Values set successfully');
-            return JSON.stringify({ success: true });
-          } catch (err) {
-            console.error('set_range_data error:', err);
-            return JSON.stringify({ error: `set_range_data failed: ${err}` });
-          }
-        }
-
-        case 'get_range_data': {
-          const startRow = args.startRow as number;
-          const startCol = args.startCol as number;
-          const endRow = args.endRow as number;
-          const endCol = args.endCol as number;
-          const worksheet = workbook.getActiveSheet();
-          const range = worksheet.getRange(startRow, startCol, endRow, endCol);
-          const values = range.getValues();
-          return JSON.stringify({ data: values });
-        }
-
-        case 'search_cells': {
-          const text = args.text as string;
-          const caseSensitive = args.caseSensitive as boolean || false;
-          const worksheet = workbook.getActiveSheet();
-          const matches: Array<{ row: number, col: number, value: string }> = [];
-
-          // Simple search implementation - could be optimized
-          for (let row = 0; row < 1000; row++) {
-            for (let col = 0; col < 100; col++) {
-              try {
-                const range = worksheet.getRange(row, col);
-                const value = String(range.getValue() || '');
-                const searchValue = caseSensitive ? value : value.toLowerCase();
-                const searchText = caseSensitive ? text : text.toLowerCase();
-                if (searchValue.includes(searchText)) {
-                  matches.push({ row, col, value });
-                }
-              } catch {
-                // Skip invalid ranges
-              }
-            }
-          }
-          return JSON.stringify({ matches });
-        }
-
-        // MCP Tools - Sheet Management
-        case 'create_sheet': {
-          try {
-            const name = args.name as string;
-            const worksheet = workbook.insertSheet(name);
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            return JSON.stringify({ success: true, sheetId: (worksheet as any).getSheetId?.() || 'unknown' });
-          } catch (err) {
-            return JSON.stringify({ error: `create_sheet failed: ${err}` });
-          }
-        }
-
-        case 'get_sheets': {
-          try {
-            const sheets = workbook.getSheets();
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const sheetList = sheets.map((_: any, idx: number) => ({
-              id: `sheet-${idx}`,
-              name: `Sheet${idx + 1}`,
-            }));
-            return JSON.stringify({ sheets: sheetList });
-          } catch (err) {
-            return JSON.stringify({ error: `get_sheets failed: ${err}` });
-          }
-        }
-
-        case 'get_active_unit_id': {
-          return JSON.stringify({ unitId: workbook.getId() });
-        }
-
-        case 'delete_sheet': {
-          const subUnitId = args.subUnitId as string;
-          // Try to find and delete the sheet by ID or name
-          const sheets = workbook.getSheets();
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const sheet = sheets.find((s: any) => s.getSheetId() === subUnitId || s.getName() === subUnitId);
-          if (sheet) {
-            workbook.removeSheet(sheet);
-            return JSON.stringify({ success: true });
-          }
-          return JSON.stringify({ error: 'Sheet not found' });
-        }
-
-        case 'rename_sheet': {
-          const subUnitId = args.subUnitId as string;
-          const name = args.name as string;
-          const sheets = workbook.getSheets();
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const sheet = sheets.find((s: any) => s.getSheetId() === subUnitId || s.getName() === subUnitId);
-          if (sheet) {
-            sheet.setName(name);
-            return JSON.stringify({ success: true });
-          }
-          return JSON.stringify({ error: 'Sheet not found' });
-        }
-
-        case 'activate_sheet': {
-          try {
-            const subUnitId = args.subUnitId as string;
-            const sheets = workbook.getSheets();
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const sheet = sheets.find((s: any) => s.getSheetId?.() === subUnitId || s.getName?.() === subUnitId);
-            if (sheet) {
-              workbook.setActiveSheet(sheet);
-              return JSON.stringify({ success: true });
-            }
-            return JSON.stringify({ error: 'Sheet not found' });
-          } catch (err) {
-            return JSON.stringify({ error: `activate_sheet failed: ${err}` });
-          }
-        }
-
-        // MCP Tools - Structure Operations
-        case 'insert_rows': {
-          const startRow = args.startRow as number;
-          const count = args.count as number;
-          const worksheet = workbook.getActiveSheet();
-          worksheet.insertRows(startRow, count);
-          return JSON.stringify({ success: true });
-        }
-
-        case 'delete_rows': {
-          const startRow = args.startRow as number;
-          const count = args.count as number;
-          const worksheet = workbook.getActiveSheet();
-          worksheet.removeRows(startRow, count);
-          return JSON.stringify({ success: true });
-        }
-
-        case 'insert_columns': {
-          try {
-            const startCol = args.startCol as number;
-            const count = args.count as number;
-            const worksheet = workbook.getActiveSheet();
-            worksheet.insertColumns(startCol, count);
-            return JSON.stringify({ success: true });
-          } catch (err) {
-            return JSON.stringify({ error: `insert_columns failed: ${err}` });
-          }
-        }
-
-        case 'delete_columns': {
-          const startCol = args.startCol as number;
-          const count = args.count as number;
-          const worksheet = workbook.getActiveSheet();
-          worksheet.removeColumns(startCol, count);
-          return JSON.stringify({ success: true });
-        }
-
-        case 'set_merge': {
-          const startRow = args.startRow as number;
-          const startCol = args.startCol as number;
-          const endRow = args.endRow as number;
-          const endCol = args.endCol as number;
-          const worksheet = workbook.getActiveSheet();
-          const range = worksheet.getRange(startRow, startCol, endRow, endCol);
-          range.merge();
-          return JSON.stringify({ success: true });
-        }
-
-        default:
-          return JSON.stringify({ error: `Unknown tool: ${name}` });
       }
+
+      // Check if response is SSE (text/event-stream) or JSON
+      const contentType = response.headers.get('content-type') || '';
+      let data;
+
+      if (contentType.includes('text/event-stream')) {
+        // Parse SSE stream
+        const text = await response.text();
+        const lines = text.split('\n');
+        let jsonData = '';
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].startsWith('data: ')) {
+            jsonData = lines[i].substring(6); // Remove 'data: ' prefix
+            break;
+          }
+        }
+
+        if (jsonData) {
+          data = JSON.parse(jsonData);
+        } else {
+          // Try to find JSON in the response
+          const jsonMatch = text.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            data = JSON.parse(jsonMatch[0]);
+          } else {
+            throw new Error('No JSON data found in SSE response');
+          }
+        }
+      } else {
+        // Regular JSON response
+        data = await response.json();
+      }
+
+      // MCP tools/call returns { result: { content: [...] } }
+      if (data.result && data.result.content) {
+        const content = data.result.content;
+        // Content is an array, extract text
+        if (Array.isArray(content) && content.length > 0) {
+          return content[0].text || JSON.stringify(content[0]);
+        }
+        return JSON.stringify(content);
+      }
+      return JSON.stringify(data.result || { success: true });
     } catch (error) {
-      return JSON.stringify({ error: `Error executing tool: ${error}` });
+      return JSON.stringify({ error: `MCP tool execution failed: ${error}` });
     }
   };
 
@@ -1410,7 +577,19 @@ Example of bad response: "I set the first 5 dates, you can use auto_fill to exte
     try {
       // Read file as array buffer
       const arrayBuffer = await file.arrayBuffer();
-      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+
+      // Read workbook - make sure we're not limiting rows
+      // Note: XLSX.read() doesn't have a default row limit, but we'll be explicit
+      const workbook = XLSX.read(arrayBuffer, {
+        type: 'array',
+        cellText: false,
+        cellDates: true,
+        sheetRows: 0, // 0 means no limit - read all rows
+      });
+
+      console.log(`File "${file.name}" loaded: ${workbook.SheetNames.length} sheet(s)`, {
+        size: (arrayBuffer.byteLength / 1024 / 1024).toFixed(2) + ' MB'
+      });
 
       // Get Univer API
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1444,54 +623,135 @@ Example of bad response: "I set the first 5 dates, you can use auto_fill to exte
       workbook.SheetNames.forEach((sheetName, sheetIndex) => {
         const worksheet = workbook.Sheets[sheetName];
 
-        // Convert sheet to JSON array format
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, {
-          header: 1,
-          defval: '',
-          raw: false
-        }) as string[][];
+        // Find the actual maximum row and column by scanning ALL cell keys
+        // This ensures we catch all data, even if !ref is incomplete
+        let maxRow = -1;
+        let maxCol = -1;
 
-        // Ensure jsonData is a proper 2D array and pad rows to same length
-        const maxCols = Math.max(...jsonData.map(row => row.length), 0);
-        const paddedData = jsonData.map(row => {
-          const padded = [...row];
-          while (padded.length < maxCols) {
-            padded.push('');
+        // Scan all keys in the worksheet object to find the actual maximum row/col
+        for (const key in worksheet) {
+          // Skip metadata keys that start with '!'
+          if (key.startsWith('!')) continue;
+
+          // Decode the cell address (e.g., 'A1' -> row 0, col 0)
+          const cellAddr = XLSX.utils.decode_cell(key);
+          if (cellAddr.r > maxRow) maxRow = cellAddr.r;
+          if (cellAddr.c > maxCol) maxCol = cellAddr.c;
+        }
+
+        // Also check !ref as a fallback/validation
+        const sheetRange = worksheet['!ref'];
+        if (sheetRange) {
+          const range = XLSX.utils.decode_range(sheetRange);
+          if (range.e.r > maxRow) maxRow = range.e.r;
+          if (range.e.c > maxCol) maxCol = range.e.c;
+          console.log(`Sheet "${sheetName}": !ref says ${sheetRange}, actual scan found rows up to ${maxRow + 1}, cols up to ${maxCol + 1}`);
+        } else {
+          console.log(`Sheet "${sheetName}": No !ref, scanning found rows up to ${maxRow + 1}, cols up to ${maxCol + 1}`);
+        }
+
+        if (maxRow < 0 || maxCol < 0) {
+          console.log(`Sheet "${sheetName}" appears empty, skipping`);
+          return;
+        }
+
+        console.log(`Reading ${maxRow + 1} rows and ${maxCol + 1} columns from sheet "${sheetName}"`);
+
+        // Read the sheet cell-by-cell to ensure we get ALL cells
+        // This ensures we capture all data even if there are gaps
+        const jsonData: string[][] = [];
+
+        // Initialize all rows up to maxRow
+        for (let row = 0; row <= maxRow; row++) {
+          jsonData[row] = [];
+          // Read all columns up to maxCol for this row
+          for (let col = 0; col <= maxCol; col++) {
+            const cellAddress = XLSX.utils.encode_cell({ r: row, c: col });
+            const cell = worksheet[cellAddress];
+
+            if (cell) {
+              // Cell has data - use its value
+              if (cell.v !== undefined && cell.v !== null) {
+                jsonData[row][col] = String(cell.v);
+              } else {
+                jsonData[row][col] = '';
+              }
+            } else {
+              // Cell is empty
+              jsonData[row][col] = '';
+            }
           }
-          return padded;
-        });
+        }
+
+        console.log(`Loaded ${jsonData.length} rows from sheet "${sheetName}"`);
+
+        // Verify we have data beyond row 1000 if the file should have it
+        if (jsonData.length > 1000) {
+          console.log(`✅ Sheet has ${jsonData.length} rows (beyond 1000) - checking for data in rows 1000+`);
+          // Check if there's actual data beyond row 1000
+          let hasDataBeyond1000 = false;
+          for (let checkRow = 1000; checkRow < Math.min(1010, jsonData.length); checkRow++) {
+            if (jsonData[checkRow] && jsonData[checkRow].some(cell => cell && cell.trim() !== '')) {
+              hasDataBeyond1000 = true;
+              console.log(`✅ Found data in row ${checkRow + 1}`);
+              break;
+            }
+          }
+          if (!hasDataBeyond1000) {
+            console.warn(`⚠️ No data found in rows 1000-1010 - file might only have data up to row 1000`);
+          }
+        }
+
+        // jsonData is already properly sized - all rows are maxCol+1 length
+        // No need to pad since we read cell-by-cell to the exact range bounds
+        const paddedData = jsonData;
+        const maxCols = maxCol + 1; // Number of columns (maxCol is 0-indexed)
 
         if (sheetIndex === 0) {
           // Use the first existing sheet
           const firstSheet = activeWorkbook.getActiveSheet();
           if (firstSheet && paddedData.length > 0 && maxCols > 0) {
             try {
-              // Use batch operation to set all values at once
-              const endRow = paddedData.length - 1;
-              const endCol = maxCols - 1;
-              const range = firstSheet.getRange(0, 0, endRow, endCol);
-
               // Convert to 2D array of strings for setValues
               const values2D: string[][] = paddedData.map(row =>
                 row.map(cell => cell !== undefined && cell !== null ? String(cell) : '')
               );
 
-              // Set all values in one batch operation
-              range.setValues(values2D);
-            } catch (e) {
-              console.warn('Batch setValues failed, falling back to cell-by-cell:', e);
-              // Fallback to cell-by-cell if batch fails
-              paddedData.forEach((row, rowIndex) => {
-                row.forEach((cellValue, colIndex) => {
-                  if (cellValue !== undefined && cellValue !== null && cellValue !== '') {
-                    try {
-                      firstSheet.getRange(rowIndex, colIndex, rowIndex, colIndex).setValue(String(cellValue));
-                    } catch {
-                      // Ignore individual cell errors
-                    }
+              console.log(`Setting ${values2D.length} rows into Univer sheet (max row index: ${values2D.length - 1})`);
+
+              // Process all files in small batches to avoid Univer issues
+              const BATCH_SIZE = 100; // Use 100 rows per batch for reliability
+              const totalRows = values2D.length;
+
+              console.log(`Processing ${totalRows} rows in batches of ${BATCH_SIZE}`);
+
+              for (let startRow = 0; startRow < totalRows; startRow += BATCH_SIZE) {
+                const endRow = Math.min(startRow + BATCH_SIZE - 1, totalRows - 1);
+                const batch = values2D.slice(startRow, endRow + 1);
+
+                // Ensure batch is properly formatted
+                const formattedBatch = batch.map(row => {
+                  const formattedRow: string[] = [];
+                  for (let i = 0; i < maxCols; i++) {
+                    formattedRow[i] = row && row[i] !== undefined && row[i] !== null ? String(row[i]) : '';
                   }
+                  return formattedRow;
                 });
-              });
+
+                try {
+                  const range = firstSheet.getRange(startRow, 0, endRow, maxCols - 1);
+                  range.setValues(formattedBatch);
+                  console.log(`✅ Set rows ${startRow} to ${endRow}`);
+                } catch (batchError) {
+                  console.warn(`⚠️ Failed to set batch ${startRow}-${endRow}, skipping:`, batchError);
+                  // Skip this batch and continue
+                }
+              }
+
+              console.log(`✅ Finished processing all ${totalRows} rows`);
+            } catch (e) {
+              console.warn('Error processing file, showing partial load:', e);
+              // Continue - we may have loaded some data
             }
 
             // Rename the sheet
@@ -1508,32 +768,39 @@ Example of bad response: "I set the first 5 dates, you can use auto_fill to exte
 
             if (paddedData.length > 0 && maxCols > 0) {
               try {
-                // Use batch operation for new sheets too
-                const endRow = paddedData.length - 1;
-                const endCol = maxCols - 1;
-                const range = newSheet.getRange(0, 0, endRow, endCol);
-
                 // Convert to 2D array of strings
                 const values2D: string[][] = paddedData.map(row =>
                   row.map(cell => cell !== undefined && cell !== null ? String(cell) : '')
                 );
 
-                // Set all values in one batch operation
-                range.setValues(values2D);
-              } catch (e) {
-                console.warn('Batch setValues failed for new sheet, falling back:', e);
-                // Fallback to cell-by-cell
-                paddedData.forEach((row, rowIndex) => {
-                  row.forEach((cellValue, colIndex) => {
-                    if (cellValue !== undefined && cellValue !== null && cellValue !== '') {
-                      try {
-                        newSheet.getRange(rowIndex, colIndex, rowIndex, colIndex).setValue(String(cellValue));
-                      } catch {
-                        // Ignore individual cell errors
-                      }
+                // Process in batches
+                const BATCH_SIZE = 100;
+                const totalRows = values2D.length;
+
+                console.log(`Processing ${totalRows} rows in sheet "${sheetName}" in batches of ${BATCH_SIZE}`);
+                for (let startRow = 0; startRow < totalRows; startRow += BATCH_SIZE) {
+                  const endRow = Math.min(startRow + BATCH_SIZE - 1, totalRows - 1);
+                  const batch = values2D.slice(startRow, endRow + 1);
+
+                  // Ensure batch is properly formatted
+                  const formattedBatch = batch.map(row => {
+                    const formattedRow: string[] = [];
+                    for (let i = 0; i < maxCols; i++) {
+                      formattedRow[i] = row && row[i] !== undefined && row[i] !== null ? String(row[i]) : '';
                     }
+                    return formattedRow;
                   });
-                });
+
+                  try {
+                    const range = newSheet.getRange(startRow, 0, endRow, maxCols - 1);
+                    range.setValues(formattedBatch);
+                    console.log(`Set rows ${startRow} to ${endRow} in sheet "${sheetName}"`);
+                  } catch {
+                    console.warn(`Failed to set batch ${startRow}-${endRow} in "${sheetName}", skipping`);
+                  }
+                }
+              } catch (e) {
+                console.error(`Error processing sheet "${sheetName}":`, e);
               }
             }
           } catch (e) {
@@ -1623,13 +890,18 @@ Example of bad response: "I set the first 5 dates, you can use auto_fill to exte
     setIsLoading(true);
 
     try {
+      const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || '';
+      if (!apiKey) {
+        throw new Error('OpenRouter API key is not configured. Please set VITE_OPENROUTER_API_KEY in your .env file.');
+      }
+
       // Call OpenRouter API with tool support
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         signal: abortController.signal,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${import.meta.env.VITE_OPENROUTER_API_KEY || ''}`,
+          'Authorization': `Bearer ${apiKey}`,
           'HTTP-Referer': window.location.origin,
           'X-Title': 'SheetGrid',
         },
@@ -1651,8 +923,28 @@ Example of bad response: "I set the first 5 dates, you can use auto_fill to exte
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(`Failed to get response from OpenRouter: ${errorData.error?.message || 'Unknown error'}`);
+        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error?.message || errorData.message || errorMessage;
+          console.error('OpenRouter API Error:', {
+            status: response.status,
+            statusText: response.statusText,
+            error: errorData,
+          });
+        } catch {
+          const text = await response.text();
+          console.error('OpenRouter API Error (non-JSON):', {
+            status: response.status,
+            statusText: response.statusText,
+            body: text.substring(0, 500),
+          });
+        }
+
+        if (response.status === 401) {
+          throw new Error(`OpenRouter authentication failed. Please check your API key in .env file. Error: ${errorMessage}`);
+        }
+        throw new Error(`Failed to get response from OpenRouter: ${errorMessage}`);
       }
 
       const data = await response.json();
@@ -1700,12 +992,17 @@ Example of bad response: "I set the first 5 dates, you can use auto_fill to exte
         }
 
         // Send the results back to OpenRouter for a final response
+        const apiKey2 = import.meta.env.VITE_OPENROUTER_API_KEY || '';
+        if (!apiKey2) {
+          throw new Error('OpenRouter API key is not configured. Please set VITE_OPENROUTER_API_KEY in your .env file.');
+        }
+
         const followUpResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           signal: abortController.signal,
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_OPENROUTER_API_KEY || ''}`,
+            'Authorization': `Bearer ${apiKey2}`,
             'HTTP-Referer': window.location.origin,
             'X-Title': 'SheetGrid',
           },
@@ -1727,6 +1024,31 @@ Example of bad response: "I set the first 5 dates, you can use auto_fill to exte
             max_tokens: 4096,
           }),
         });
+
+        if (!followUpResponse.ok) {
+          let errorMessage = `HTTP ${followUpResponse.status}: ${followUpResponse.statusText}`;
+          try {
+            const errorData = await followUpResponse.json();
+            errorMessage = errorData.error?.message || errorData.message || errorMessage;
+            console.error('OpenRouter Follow-up API Error:', {
+              status: followUpResponse.status,
+              statusText: followUpResponse.statusText,
+              error: errorData,
+            });
+          } catch {
+            const text = await followUpResponse.text();
+            console.error('OpenRouter Follow-up API Error (non-JSON):', {
+              status: followUpResponse.status,
+              statusText: followUpResponse.statusText,
+              body: text.substring(0, 500),
+            });
+          }
+
+          if (followUpResponse.status === 401) {
+            throw new Error(`OpenRouter authentication failed. Please check your API key in .env file. Error: ${errorMessage}`);
+          }
+          throw new Error(`Failed to get follow-up response from OpenRouter: ${errorMessage}`);
+        }
 
         const followUpData = await followUpResponse.json();
         console.log('Follow-up response complete:', followUpData);
@@ -1772,7 +1094,7 @@ Example of bad response: "I set the first 5 dates, you can use auto_fill to exte
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${import.meta.env.VITE_OPENROUTER_API_KEY || ''}`,
+              'Authorization': `Bearer ${apiKey2}`,
               'HTTP-Referer': window.location.origin,
               'X-Title': 'SheetGrid',
             },
@@ -1797,6 +1119,31 @@ Example of bad response: "I set the first 5 dates, you can use auto_fill to exte
             }),
           });
 
+          if (!finalFollowUpResponse.ok) {
+            let errorMessage = `HTTP ${finalFollowUpResponse.status}: ${finalFollowUpResponse.statusText}`;
+            try {
+              const errorData = await finalFollowUpResponse.json();
+              errorMessage = errorData.error?.message || errorData.message || errorMessage;
+              console.error('OpenRouter Final Follow-up API Error:', {
+                status: finalFollowUpResponse.status,
+                statusText: finalFollowUpResponse.statusText,
+                error: errorData,
+              });
+            } catch {
+              const text = await finalFollowUpResponse.text();
+              console.error('OpenRouter Final Follow-up API Error (non-JSON):', {
+                status: finalFollowUpResponse.status,
+                statusText: finalFollowUpResponse.statusText,
+                body: text.substring(0, 500),
+              });
+            }
+
+            if (finalFollowUpResponse.status === 401) {
+              throw new Error(`OpenRouter authentication failed. Please check your API key in .env file. Error: ${errorMessage}`);
+            }
+            throw new Error(`Failed to get final follow-up response from OpenRouter: ${errorMessage}`);
+          }
+
           const finalFollowUpData = await finalFollowUpResponse.json();
           console.log('Final follow-up data:', finalFollowUpData);
           const finalMessage: Message = {
@@ -1815,6 +1162,7 @@ Example of bad response: "I set the first 5 dates, you can use auto_fill to exte
             }, 500);
           }
         } else {
+          // No more tool calls, final response
           const finalMessage: Message = {
             role: 'assistant',
             content: followUpData.choices?.[0]?.message?.content || 'Operations completed successfully.',
@@ -1832,24 +1180,19 @@ Example of bad response: "I set the first 5 dates, you can use auto_fill to exte
           }
         }
       } else {
-        // Direct response without tools
+        // No tool calls, direct response
         const assistantMessage: Message = {
           role: 'assistant',
-          content: data.choices?.[0]?.message?.content || 'I received your message.',
+          content: data.choices?.[0]?.message?.content || 'No response',
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, assistantMessage]);
       }
     } catch (error) {
-      // Don't show error message if request was aborted by user
-      if (error instanceof Error && error.name === 'AbortError') {
-        console.log('Request was cancelled by user');
-        return;
-      }
       console.error('Chat error:', error);
       const errorMessage: Message = {
         role: 'assistant',
-        content: `Sorry, I encountered an error. ${error instanceof Error ? error.message : 'Please check your OpenRouter API key and connection.'}`,
+        content: `Sorry, I encountered an error. ${error instanceof Error ? error.message : 'Unknown error'}`,
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMessage]);
