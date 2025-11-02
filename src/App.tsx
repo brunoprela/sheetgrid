@@ -5,7 +5,7 @@ import { getAllChats, createChat, deleteChat, type Chat } from './utils/indexedd
 
 function App() {
   // Load saved chat width from localStorage on mount
-  const [chatVisible, setChatVisible] = useState(true);
+  const [chatVisible] = useState(true);
   const [chatWidth, setChatWidth] = useState(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('chatPanelWidth');
@@ -113,7 +113,7 @@ function App() {
     };
 
     // Prevent popstate (back/forward navigation)
-    const handlePopState = (e: PopStateEvent) => {
+    const handlePopState = () => {
       // Prevent navigation if it's not a user-initiated action
       if (window.history.state === null) {
         window.history.pushState({ preventBack: true }, '');
@@ -180,6 +180,8 @@ function App() {
     loadChatTitle();
   }, [activeChatId]);
 
+  // Note: handleChatCreated is defined but not currently used - keeping for future use
+  // TypeScript configuration allows unused functions
   const handleChatCreated = async (chat: Chat) => {
     setActiveChatId(chat.id);
     setActiveChatTitle(chat.title);

@@ -24,6 +24,8 @@ interface ToolCall {
 }
 
 export default function ChatPanel({ chatId, chatTitle, onCreateNewChat, onChatTitleChange, onSelectChat, onDeleteChat, allChats = [] }: ChatPanelProps) {
+  // chatTitle is passed from parent but not currently used in this component
+  void chatTitle;
   // System message should not be persisted
   const systemMessage: Message = {
     role: 'system',

@@ -123,7 +123,7 @@ export default function Spreadsheet({}: SpreadsheetProps) {
           console.log('✓ Step 7: Calling univerAPI.redo()...');
           univerAPI.redo().then(() => {
             console.log('✅ Redo executed successfully via keyboard shortcut!');
-          }).catch((err) => {
+          }).catch((err: Error) => {
             console.error('❌ Step 8: Error calling univerAPI.redo():', err);
             // Fallback: try executeCommand with univer.command.redo
             if (typeof univerAPI.executeCommand === 'function') {
@@ -400,7 +400,8 @@ export default function Spreadsheet({}: SpreadsheetProps) {
                   console.log(`Loaded ${paddedData.length} rows × ${maxCol + 1} cols into first sheet`);
 
                   // Rename sheet if name differs
-                  const currentName = firstSheet.getName?.() || 'Sheet';
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const currentName = (firstSheet as any).getName?.() || 'Sheet';
                   if (firstSheetData.name && currentName !== firstSheetData.name) {
                     try {
                       firstSheet.setName(firstSheetData.name);
@@ -524,7 +525,7 @@ export default function Spreadsheet({}: SpreadsheetProps) {
           console.log('✓ Found univerAPI.redo() method');
           univerAPI.redo().then(() => {
             console.log('✓ Redo executed successfully via univerAPI.redo()');
-          }).catch((err) => {
+          }).catch((err: Error) => {
             console.error('❌ Error calling univerAPI.redo():', err);
           });
           return;

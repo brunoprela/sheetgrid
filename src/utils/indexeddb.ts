@@ -8,7 +8,10 @@ const STORES = {
   WORKBOOK_DATA: 'workbook_data',
 };
 
-interface DBOpener {
+// Interface for database opener (not currently used but kept for type safety)
+// Using an exported empty object to avoid unused type error
+// eslint-disable-next-line @typescript-eslint/no-unused-vars, @typescript-eslint/no-empty-object-type
+export interface DBOpener {
   db: IDBDatabase;
 }
 
@@ -42,7 +45,8 @@ export async function initDB(): Promise<IDBDatabase> {
         chatStore.createIndex('chatId', 'chatId', { unique: false });
       } else if (oldVersion < 2) {
         // Migrate existing data: add chatId index
-        const chatStore = event.target?.transaction?.objectStore(STORES.CHAT_HISTORY);
+        const transaction = (event.target as IDBOpenDBRequest).transaction;
+        const chatStore = transaction?.objectStore(STORES.CHAT_HISTORY);
         if (chatStore && !chatStore.indexNames.contains('chatId')) {
           chatStore.createIndex('chatId', 'chatId', { unique: false });
         }

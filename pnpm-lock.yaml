@@ -2643,8 +2643,8 @@ packages:
     resolution: {integrity: sha512-P8BjAsXvZS+VIDUI11hHCQEv74YT67YUi5JJFNWIqL235sBmjX4+qx9Muvls5ivyNENctx46xQLQ3aTuE7ssaQ==}
     engines: {node: '>=6'}
 
-  caniuse-lite@1.0.30001752:
-    resolution: {integrity: sha512-vKUk7beoukxE47P5gcVNKkDRzXdVofotshHwfR9vmpeFKxmI5PBpgOMC18LUJUA/DvJ70Y7RveasIBraqsyO/g==}
+  caniuse-lite@1.0.30001753:
+    resolution: {integrity: sha512-Bj5H35MD/ebaOV4iDLqPEtiliTN29qkGtEHCwawWn4cYm+bPJM2NsaP30vtZcnERClMzp52J4+aw2UNbK4o+zw==}
 
   cfb@1.2.2:
     resolution: {integrity: sha512-KfdUZsSOw19/ObEWasvBP/Ac4reZvAGauZhs6S/gqNhXhI7cKwvlH7ulj+dOEYnca4bm4SGo8C1bTAQvnTjgQA==}
@@ -8354,7 +8354,7 @@ snapshots:
   browserslist@4.27.0:
     dependencies:
       baseline-browser-mapping: 2.8.23
-      caniuse-lite: 1.0.30001752
+      caniuse-lite: 1.0.30001753
       electron-to-chromium: 1.5.244
       node-releases: 2.0.27
       update-browserslist-db: 1.1.4(browserslist@4.27.0)
@@ -8382,7 +8382,7 @@ snapshots:
 
   callsites@3.1.0: {}
 
-  caniuse-lite@1.0.30001752: {}
+  caniuse-lite@1.0.30001753: {}
 
   cfb@1.2.2:
     dependencies:
@@ -9712,7 +9712,7 @@ snapshots:
     dependencies:
       '@next/env': 16.0.1
       '@swc/helpers': 0.5.15
-      caniuse-lite: 1.0.30001752
+      caniuse-lite: 1.0.30001753
       postcss: 8.4.31
       react: 19.2.0
       react-dom: 19.2.0(react@19.2.0)
