@@ -35,12 +35,30 @@ export default function ChatPanel({ chatId, chatTitle, onCreateNewChat, onChatTi
     role: 'system',
     content: `You are a helpful assistant that can edit Excel spreadsheets using tools. 
 
-CRITICAL: When generating random numbers or values, you MUST provide actual numeric values in your tool calls:
-- DO NOT use JavaScript code like "Math.floor(Math.random() * 1001)"
-- DO NOT use Python code like "[Math.round(Math.random() * 1000) for i in range(30)]"
-- DO NOT use any code syntax - only provide the actual numbers
-- Example: If asked for 30 random numbers 0-1000, generate 30 actual numbers like [342, 891, 123, ...] not code
-- Always calculate the values yourself and provide the complete array of actual numbers
+AVAILABLE CAPABILITIES:
+📊 Data Operations: set_range_data (set cell values), get_range_data (read cell data), search_cells (find content), auto_fill (fill patterns), format_brush (copy formatting)
+📋 Sheet Management: create_sheet, delete_sheet, rename_sheet, activate_sheet, move_sheet, set_sheet_display_status, get_sheets, get_active_unit_id
+🏗️ Structure Operations: insert_rows/columns, delete_rows/columns, set_cell_dimensions (row height/column width), set_merge (merge cells)
+🎨 Formatting & Styling: set_range_style, add_conditional_formatting_rule, set_conditional_formatting_rule, delete_conditional_formatting_rule, get_conditional_formatting_rules
+✅ Data Validation: add_data_validation_rule, set_data_validation_rule, delete_data_validation_rule, get_data_validation_rules
+🔍 Utility Functions: get_activity_status (workbook info), scroll_and_screenshot
+
+CRITICAL RULE - NO CODE IN TOOL CALLS: When you need to generate random numbers or any calculated values, you MUST compute them yourself and provide ONLY the actual results as numbers/strings. NEVER include any code in your tool calls.
+- NEVER write: "Math.floor(Math.random() * 101)" - write the actual number like: 47
+- NEVER write: "[Math.round(Math.random() * 1000) for i in range(30)]" - write the array of actual numbers: [342, 891, 123, 567, ...]
+- NEVER include ANY programming syntax (Math., random(), for loops, etc.) in tool call arguments
+- ONLY provide the final calculated values as pure JSON data
+- If asked for 5 random numbers 0-100, generate something like: [47, 82, 15, 93, 6]
+- Example CORRECT usage for dates Nov 1-5: ["2023-11-01", "2023-11-02", "2023-11-03", "2023-11-04", "2023-11-05"]
+- Example CORRECT usage for random profits: [47, 82, 15, 93, 6]
+
+TOOL USAGE GUIDELINES:
+- Before using tools, understand what you're working with by checking sheet structure first
+- Use get_sheets to see available sheets and their names
+- Use get_range_data to understand the data format before making changes
+- Validate your tool arguments match the expected types (strings, numbers, arrays, objects)
+- If a tool fails, read the error message carefully and adjust your approach
+- Be efficient with tool calls - group related operations when possible
 
 IMPORTANT RULES:
 1. Be concise and direct in your responses - users only want to see results, not your analysis or thinking process
@@ -91,6 +109,7 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
   const [isUploading, setIsUploading] = useState(false);
   const [selectedModel, setSelectedModel] = useState('anthropic/claude-3-haiku');
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
   const availableModels = [
     'anthropic/claude-3-haiku',
   ];
@@ -101,6 +120,9 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
   const abortControllerRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Configuration constants
+  const MAX_TOOLS_PER_ROUND = 15;
 
   // Function to clean context from message content
   const cleanMessageContent = (content: string): string => {
@@ -450,7 +472,7 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
     return mcpTools;
   };
 
-  const executeTool = async (toolCall: ToolCall): Promise<string> => {
+  const executeTool = async (toolCall: ToolCall, retries = 2): Promise<string> => {
     const { name, arguments: args } = toolCall;
 
     // Check if this is an MCP tool (from server)
@@ -461,7 +483,7 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
       return JSON.stringify({ error: `Tool "${name}" is not available. Only MCP server tools are supported.` });
     }
 
-    console.log(`Tool "${name}": routing to MCP server`, 'args:', JSON.stringify(args));
+    console.log(`Tool "${name}": routing to MCP server (attempt ${3 - retries}/${3})`, 'args:', JSON.stringify(args));
 
     const apiKey = univerMcpKey || import.meta.env.VITE_UNIVER_MCP_API_KEY || '';
     if (!apiKey) {
@@ -471,24 +493,39 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sessionId = (window as any).univerSessionId || 'default';
 
-    try {
-      const response = await fetch(`https://mcp.univer.ai/mcp/?univer_session_id=${sessionId}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-          'Accept': 'application/json, text/event-stream',
-        },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: Date.now(),
-          method: 'tools/call',
-          params: {
-            name: name,
-            arguments: args,
+    const executeWithTimeout = async (): Promise<Response> => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
+      try {
+        const response = await fetch(`https://mcp.univer.ai/mcp/?univer_session_id=${sessionId}`, {
+          method: 'POST',
+          signal: controller.signal,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+            'Accept': 'application/json, text/event-stream',
           },
-        }),
-      });
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: Date.now(),
+            method: 'tools/call',
+            params: {
+              name: name,
+              arguments: args,
+            },
+          }),
+        });
+        clearTimeout(timeoutId);
+        return response;
+      } catch (error) {
+        clearTimeout(timeoutId);
+        throw error;
+      }
+    };
+
+    try {
+      const response = await executeWithTimeout();
 
       if (!response.ok) {
         try {
@@ -555,7 +592,15 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
       }
       return JSON.stringify(data.result || { success: true });
     } catch (error) {
-      return JSON.stringify({ error: `MCP tool execution failed: ${error}` });
+      // Retry logic with exponential backoff
+      if (retries > 0) {
+        console.warn(`Tool "${name}" failed, retrying... (${retries} attempts left)`);
+        await new Promise(resolve => setTimeout(resolve, 1000 * (3 - retries))); // 1s, 2s delays
+        return executeTool(toolCall, retries - 1);
+      }
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`Tool "${name}" failed after all retries:`, errorMsg);
+      return JSON.stringify({ error: `MCP tool execution failed: ${errorMsg}` });
     }
   };
 
@@ -914,6 +959,7 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
         body: JSON.stringify({
           model: selectedModel,
           messages: [
+            systemMessage,
             ...updatedMessages.filter(m => m.role !== 'system').map((m) => {
               // Add context to the latest user message for AI
               if (m.role === 'user' && m.content === input.trim() && context) {
@@ -966,20 +1012,40 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
         };
         setMessages((prev) => [...prev, assistantMessage]);
 
-        // Execute all tool calls
+        // Execute all tool calls with limit
+        const toolCallsToExecute = data.choices[0].message.tool_calls.slice(0, MAX_TOOLS_PER_ROUND);
+
+        if (data.choices[0].message.tool_calls.length > MAX_TOOLS_PER_ROUND) {
+          console.warn(`Too many tool calls (${data.choices[0].message.tool_calls.length}), limiting to ${MAX_TOOLS_PER_ROUND}`);
+        }
+
         const toolResults: Array<{ name: string; result: string }> = [];
-        for (const toolCall of data.choices[0].message.tool_calls) {
+        for (let i = 0; i < toolCallsToExecute.length; i++) {
+          const toolCall = toolCallsToExecute[i];
           // Check if request was aborted
           if (abortController.signal.aborted) {
             console.log('Request aborted, stopping tool execution');
             return;
           }
-          console.log('Executing tool:', toolCall.function.name, toolCall.function.arguments);
+          console.log(`Executing tool ${i + 1}/${toolCallsToExecute.length}: ${toolCall.function.name}`);
+          let parsedArgs = {};
+          if (toolCall.function.arguments) {
+            try {
+              parsedArgs = JSON.parse(toolCall.function.arguments);
+              // Handle double-encoded JSON (sometimes OpenAI returns string-encoded JSON)
+              if (typeof parsedArgs === 'string') {
+                parsedArgs = JSON.parse(parsedArgs);
+              }
+            } catch (e) {
+              console.error('Failed to parse tool arguments:', e, toolCall.function.arguments);
+              parsedArgs = {};
+            }
+          }
           const result = await executeTool({
             name: toolCall.function.name,
-            arguments: toolCall.function.arguments ? JSON.parse(toolCall.function.arguments) : {},
+            arguments: parsedArgs,
           });
-          console.log('Tool result:', result);
+          console.log(`Tool ${i + 1}/${toolCallsToExecute.length} complete: ${toolCall.function.name}`);
           toolResults.push({ name: toolCall.function.name, result });
         }
 
@@ -1015,6 +1081,7 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
           body: JSON.stringify({
             model: selectedModel,
             messages: [
+              systemMessage,
               ...updatedMessages.filter(m => m.role !== 'system').map((m) => {
                 // Add context to the latest user message for AI
                 if (m.role === 'user' && m.content === input.trim() && context) {
@@ -1066,18 +1133,34 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
         if (followUpData.choices?.[0]?.message?.tool_calls && followUpData.choices[0].message.tool_calls.length > 0) {
           console.log('Follow-up tool calls:', JSON.stringify(followUpData.choices[0].message.tool_calls, null, 2));
           const followUpToolResults: Array<{ name: string; result: string }> = [];
-          for (const toolCall of followUpData.choices[0].message.tool_calls) {
+          const followUpToolCalls = followUpData.choices[0].message.tool_calls.slice(0, MAX_TOOLS_PER_ROUND);
+
+          for (let i = 0; i < followUpToolCalls.length; i++) {
+            const toolCall = followUpToolCalls[i];
             // Check if request was aborted
             if (abortController.signal.aborted) {
               console.log('Request aborted, stopping follow-up tool execution');
               return;
             }
-            console.log('Executing follow-up tool:', toolCall.function.name, toolCall.function.arguments);
+            console.log(`Executing follow-up tool ${i + 1}/${followUpToolCalls.length}: ${toolCall.function.name}`);
+            let parsedArgs = {};
+            if (toolCall.function.arguments) {
+              try {
+                parsedArgs = JSON.parse(toolCall.function.arguments);
+                // Handle double-encoded JSON
+                if (typeof parsedArgs === 'string') {
+                  parsedArgs = JSON.parse(parsedArgs);
+                }
+              } catch (e) {
+                console.error('Failed to parse follow-up tool arguments:', e, toolCall.function.arguments);
+                parsedArgs = {};
+              }
+            }
             const result = await executeTool({
               name: toolCall.function.name,
-              arguments: toolCall.function.arguments ? JSON.parse(toolCall.function.arguments) : {},
+              arguments: parsedArgs,
             });
-            console.log('Follow-up tool result:', result);
+            console.log(`Follow-up tool ${i + 1}/${followUpToolCalls.length} complete: ${toolCall.function.name}`);
             followUpToolResults.push({ name: toolCall.function.name, result });
           }
 
@@ -1107,6 +1190,7 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
             body: JSON.stringify({
               model: selectedModel,
               messages: [
+                systemMessage,
                 ...updatedMessages.filter(m => m.role !== 'system').map((m) => {
                   // Add context to the latest user message for AI
                   if (m.role === 'user' && m.content === input.trim() && context) {
@@ -1211,7 +1295,7 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
   return (
     <div className="flex flex-col h-full bg-[#FAFAFA]">
       {/* Top Bar - Cursor style with browser tabs */}
-      <div className="border-b border-[#E0E0E0] bg-white">
+      <div className="border-b border-[#E0E0E0] bg-white relative">
         {/* Tabs container */}
         <div className="flex items-end overflow-x-auto scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
           <div className="flex items-end min-w-full">
@@ -1267,7 +1351,111 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
             </button>
           </div>
         </div>
+
+        {/* Info button */}
+        <div className="absolute top-0 right-0 px-3 py-2.5">
+          <button
+            onClick={() => setShowInfo(!showInfo)}
+            className="text-[#666666] hover:text-[#0066CC] transition-colors"
+            title="Show capabilities"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </button>
+        </div>
       </div>
+
+      {/* Info Modal */}
+      {showInfo && (
+        <div className="absolute inset-0 bg-black bg-opacity-30 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[85vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+              <h2 className="text-2xl font-bold text-gray-900">SheetGrid Capabilities</h2>
+              <button
+                onClick={() => setShowInfo(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="p-6">
+              <div className="mb-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-3">📊 Data Operations</h3>
+                <ul className="space-y-1 text-sm text-gray-700">
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">set_range_data</code> - Set values in cell ranges</li>
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">get_range_data</code> - Read cell values and data</li>
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">search_cells</code> - Search for specific content in cells</li>
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">auto_fill</code> - Auto-fill data patterns</li>
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">format_brush</code> - Copy and apply cell formatting</li>
+                </ul>
+              </div>
+
+              <div className="mb-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-3">📋 Sheet Management</h3>
+                <ul className="space-y-1 text-sm text-gray-700">
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">create_sheet</code> - Create new worksheets</li>
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">delete_sheet</code> - Remove worksheets</li>
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">rename_sheet</code> - Rename existing sheets</li>
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">activate_sheet</code> - Switch active worksheet</li>
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">move_sheet</code> - Reorder sheet positions</li>
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">set_sheet_display_status</code> - Show/hide sheets</li>
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">get_sheets</code> - List all sheets</li>
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">get_active_unit_id</code> - Get current workbook ID</li>
+                </ul>
+              </div>
+
+              <div className="mb-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-3">🏗️ Structure Operations</h3>
+                <ul className="space-y-1 text-sm text-gray-700">
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">insert_rows</code> / <code className="bg-gray-100 px-1.5 py-0.5 rounded">insert_columns</code> - Add rows and columns</li>
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">delete_rows</code> / <code className="bg-gray-100 px-1.5 py-0.5 rounded">delete_columns</code> - Remove rows and columns</li>
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">set_cell_dimensions</code> - Adjust row heights and column widths</li>
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">set_merge</code> - Merge cell ranges</li>
+                </ul>
+              </div>
+
+              <div className="mb-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-3">🎨 Formatting & Styling</h3>
+                <ul className="space-y-1 text-sm text-gray-700">
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">set_range_style</code> - Apply cell styling</li>
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">add_conditional_formatting_rule</code> - Add conditional formatting</li>
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">set_conditional_formatting_rule</code> - Update conditional formatting</li>
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">delete_conditional_formatting_rule</code> - Remove conditional formatting</li>
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">get_conditional_formatting_rules</code> - List formatting rules</li>
+                </ul>
+              </div>
+
+              <div className="mb-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-3">✅ Data Validation</h3>
+                <ul className="space-y-1 text-sm text-gray-700">
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">add_data_validation_rule</code> - Add validation rules</li>
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">set_data_validation_rule</code> - Update validation rules</li>
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">delete_data_validation_rule</code> - Remove validation rules</li>
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">get_data_validation_rules</code> - List validation rules</li>
+                </ul>
+              </div>
+
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-3">🔍 Utility Functions</h3>
+                <ul className="space-y-1 text-sm text-gray-700">
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">get_activity_status</code> - Get workbook status and info</li>
+                  <li><code className="bg-gray-100 px-1.5 py-0.5 rounded">scroll_and_screenshot</code> - Navigate and capture screenshots</li>
+                </ul>
+              </div>
+
+              <div className="mt-8 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-sm text-blue-900">
+                  <strong>💡 Tip:</strong> Just describe what you want to do in natural language. The AI will automatically use the right tools to complete your request!
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">
