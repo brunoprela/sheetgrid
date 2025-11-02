@@ -1,7 +1,16 @@
 import { useState, useRef, useEffect } from 'react';
+import * as XLSX from 'xlsx';
+import { loadChatMessages, saveAllChatMessages, updateChat } from '../src/utils/indexeddb';
 
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
-interface ChatPanelProps { }
+interface ChatPanelProps {
+  chatId: string;
+  chatTitle: string;
+  onCreateNewChat: () => void;
+  onChatTitleChange?: (title: string) => void;
+  onSelectChat?: (chatId: string) => void;
+  onDeleteChat?: (chatId: string) => void;
+  allChats?: Array<{ id: string; title: string; updatedAt: string }>;
+}
 
 interface Message {
   role: 'user' | 'assistant' | 'system';
@@ -14,16 +23,42 @@ interface ToolCall {
   arguments: Record<string, unknown>;
 }
 
-export default function ChatPanel({ }: ChatPanelProps) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: 'system',
-      content: 'You are a helpful assistant that can edit Excel spreadsheets using tools. When the user asks you to create a column with dates, you MUST: 1) use set_column_header to create the header, AND 2) use set_range_data to fill in all the date values. Never stop after just one tool call - you must complete ALL steps of the task using multiple tool calls.',
-      timestamp: new Date(),
-    },
-  ]);
+export default function ChatPanel({ chatId, chatTitle, onCreateNewChat, onChatTitleChange, onSelectChat, onDeleteChat, allChats = [] }: ChatPanelProps) {
+  // System message should not be persisted
+  const systemMessage: Message = {
+    role: 'system',
+    content: `You are a helpful assistant that can edit Excel spreadsheets using tools. 
+
+CRITICAL: When generating random numbers or values, you MUST provide actual numeric values in your tool calls:
+- DO NOT use JavaScript code like "Math.floor(Math.random() * 1001)"
+- DO NOT use Python code like "[Math.round(Math.random() * 1000) for i in range(30)]"
+- DO NOT use any code syntax - only provide the actual numbers
+- Example: If asked for 30 random numbers 0-1000, generate 30 actual numbers like [342, 891, 123, ...] not code
+- Always calculate the values yourself and provide the complete array of actual numbers
+
+IMPORTANT RULES:
+1. Be concise and direct in your responses - users only want to see results, not your analysis or thinking process
+2. Before performing operations, silently check the sheet structure using get_sheets and get_range_data
+3. Do not explain what you're doing step-by-step - just execute the operations
+4. After completing operations, provide only a brief confirmation of what was done
+5. When the user asks you to create a column with dates or fill a range, you MUST:
+   - Use set_column_header to create the header (if needed)
+   - Use set_range_data to fill in ALL the requested values completely
+   - NEVER stop after just a few rows - you must fill the ENTIRE requested range
+   - If the user asks for dates from Nov 1 to Nov 30, you must create ALL 30 dates, not just 5
+   - Make multiple tool calls if needed to complete the full range - never leave partial data
+6. Always complete the ENTIRE task before responding - partial completion is not acceptable
+
+Example of good response: "I've created a Date column with all dates from November 1 to November 30, 2025."
+Example of bad response: "I set the first 5 dates, you can use auto_fill to extend the rest..."`,
+    timestamp: new Date(),
+  };
+
+  const [messages, setMessages] = useState<Message[]>([systemMessage]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [selectedModel, setSelectedModel] = useState('anthropic/claude-3-haiku');
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const availableModels = [
@@ -35,10 +70,210 @@ export default function ChatPanel({ }: ChatPanelProps) {
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Function to clean context from message content
+  const cleanMessageContent = (content: string): string => {
+    // Remove [Current Sheet Context] block if it exists
+    const contextPattern = /\n\n\[Current Sheet Context\][\s\S]*$/;
+    return content.replace(contextPattern, '').trim();
+  };
+
+  // Load chat history from IndexedDB when chatId changes
+  useEffect(() => {
+    const loadHistory = async () => {
+      setIsLoadingHistory(true);
+      try {
+        const savedMessages = await loadChatMessages(chatId);
+        if (savedMessages && savedMessages.length > 0) {
+          // Filter out system messages from saved history (we'll add our own)
+          // Also clean any context that might have been saved in old messages
+          const userMessages = savedMessages
+            .filter((msg: Message) => msg.role !== 'system')
+            .map((msg: Message) => ({
+              ...msg,
+              content: cleanMessageContent(msg.content),
+            }));
+          setMessages([systemMessage, ...userMessages]);
+          console.log(`Loaded ${userMessages.length} messages from IndexedDB for chat ${chatId}`);
+        } else {
+          // No saved messages, just set system message
+          setMessages([systemMessage]);
+        }
+      } catch (error) {
+        console.error('Error loading chat history:', error);
+        setMessages([systemMessage]);
+      } finally {
+        setIsLoadingHistory(false);
+      }
+    };
+
+    loadHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatId]); // Reload when chatId changes
+
+  // Save messages to IndexedDB whenever they change (debounced)
+  useEffect(() => {
+    if (isLoadingHistory) return; // Don't save while loading
+
+    const saveTimeout = setTimeout(async () => {
+      try {
+        // Filter out system message before saving
+        const messagesToSave = messages.filter(msg => msg.role !== 'system');
+        if (messagesToSave.length > 0) {
+          await saveAllChatMessages(chatId, messagesToSave);
+        }
+      } catch (error) {
+        console.error('Error saving chat history:', error);
+      }
+    }, 1000); // Debounce saves by 1 second
+
+    return () => clearTimeout(saveTimeout);
+  }, [messages, isLoadingHistory, chatId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Function to get current sheet context
+  const getSheetContext = (): string => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const univerAPI = (window as any).univerAPI;
+      if (!univerAPI) return '';
+
+      const workbook = univerAPI.getActiveWorkbook();
+      if (!workbook) return '';
+
+      const sheet = workbook.getActiveSheet();
+      if (!sheet) return '';
+
+      // Get sheet name - try multiple methods to find the correct name
+      let sheetName = 'Sheet1'; // Default to Sheet1 as Univer's default
+      try {
+        // Method 1: Get active sheet ID and find it in sheets list
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const sheetId = (sheet as any).getSheetId?.();
+        if (sheetId) {
+          const sheets = workbook.getSheets();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const foundSheet = sheets.find((s: any) => {
+            try {
+              return s.getSheetId?.() === sheetId;
+            } catch {
+              return false;
+            }
+          });
+          if (foundSheet) {
+            // Try multiple ways to get the name
+            if (typeof foundSheet.getName === 'function') {
+              sheetName = foundSheet.getName();
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            } else if ((foundSheet as any).name) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              sheetName = (foundSheet as any).name;
+            }
+          }
+        }
+
+        // Method 2: Try getName() directly on the sheet object
+        if (sheetName === 'Sheet1' && typeof sheet.getName === 'function') {
+          try {
+            const directName = sheet.getName();
+            if (directName) sheetName = directName;
+          } catch {
+            // Ignore
+          }
+        }
+      } catch (e) {
+        console.warn('Could not get sheet name:', e);
+      }
+
+      // Ensure we have a valid name (fallback to Sheet1 if empty)
+      if (!sheetName || sheetName === 'Active Sheet') {
+        sheetName = 'Sheet1';
+      }
+
+      // Get a sample of data (first 10 rows, first 10 columns) to understand structure
+      let context = `Current Sheet: "${sheetName}"\n`;
+
+      try {
+        // Get headers (row 0) - check first 20 columns
+        const headers = [];
+        for (let col = 0; col < 20; col++) {
+          try {
+            const cellRange = sheet.getRange(0, col);
+            const value = cellRange.getValue();
+            if (value !== null && value !== undefined && String(value).trim() !== '') {
+              headers.push(String(value));
+            } else if (headers.length > 0) {
+              // Stop if we hit an empty cell after finding headers
+              break;
+            }
+          } catch {
+            break;
+          }
+        }
+
+        if (headers.length > 0) {
+          context += `Column Headers: ${headers.join(', ')}\n`;
+        }
+
+        // Try to get dimensions by reading a larger range
+        // Read first 100 rows and 20 columns to understand structure
+        let rowCount = 0;
+        let colCount = headers.length || 10;
+
+        try {
+          const sampleRange = sheet.getRange(0, 0, 100, Math.max(colCount, 20));
+          const sampleData = sampleRange.getValues();
+          rowCount = sampleData.length;
+          colCount = sampleData[0]?.length || colCount;
+        } catch {
+          // Fallback: try smaller range
+          try {
+            const smallRange = sheet.getRange(0, 0, 10, 10);
+            const smallData = smallRange.getValues();
+            rowCount = smallData.length;
+            colCount = smallData[0]?.length || colCount;
+          } catch {
+            // Use defaults
+            rowCount = 100;
+          }
+        }
+
+        context += `Sheet Dimensions: ~${rowCount} rows × ~${colCount} columns\n`;
+
+        // Get a sample of the first few data rows (skip header row 0)
+        const sampleRows = Math.min(5, Math.max(1, rowCount - 1));
+        context += `\nSample Data (first ${sampleRows} data rows):\n`;
+
+        for (let row = 1; row <= sampleRows && row < rowCount; row++) {
+          const rowData = [];
+          for (let col = 0; col < Math.min(headers.length || colCount, colCount); col++) {
+            try {
+              const cellRange = sheet.getRange(row, col);
+              const value = cellRange.getValue();
+              rowData.push(value !== null && value !== undefined ? String(value).substring(0, 30) : '');
+            } catch {
+              rowData.push('');
+            }
+          }
+          if (rowData.some(cell => cell.trim() !== '')) {
+            context += `Row ${row}: ${rowData.join(' | ')}\n`;
+          }
+        }
+      } catch (e) {
+        console.warn('Error getting sheet context:', e);
+      }
+
+      return context;
+    } catch (error) {
+      console.warn('Could not get sheet context:', error);
+      return '';
+    }
+  };
+
 
   // Auto-resize textarea
   useEffect(() => {
@@ -272,7 +507,7 @@ export default function ChatPanel({ }: ChatPanelProps) {
         type: 'function',
         function: {
           name: 'set_range_data',
-          description: 'Set values in cell ranges',
+          description: 'Set values in a cell range. IMPORTANT: Use this to fill ENTIRE ranges completely. If the user requests 30 dates, provide all 30 values in the values array. Never provide partial data - always complete the full requested range.',
           parameters: {
             type: 'object',
             properties: {
@@ -537,9 +772,25 @@ export default function ChatPanel({ }: ChatPanelProps) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const isMcpTool = mcpTools.some((tool: any) => tool.function.name === name);
 
-    console.log(`Tool "${name}": ${isMcpTool ? 'routing to MCP server' : 'using local implementation'}`);
+    // For set_range_data, check if args contain code instead of actual values
+    // If so, use local implementation to convert code to values
+    let shouldUseLocal = false;
+    if (name === 'set_range_data') {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const itemsStr = (args as any).items;
+      if (typeof itemsStr === 'string') {
+        // Check if it contains code (JavaScript or Python)
+        if (itemsStr.includes('Math.random') || itemsStr.includes('Math.round') || itemsStr.includes('Math.floor') ||
+          itemsStr.includes('for i in range') || itemsStr.includes('random()')) {
+          console.log('set_range_data: Detected code in arguments, using local implementation to convert');
+          shouldUseLocal = true;
+        }
+      }
+    }
 
-    if (isMcpTool) {
+    console.log(`Tool "${name}": ${isMcpTool && !shouldUseLocal ? 'routing to MCP server' : 'using local implementation'}`, 'args:', JSON.stringify(args));
+
+    if (isMcpTool && !shouldUseLocal) {
       try {
         const apiKey = import.meta.env.VITE_UNIVER_MCP_API_KEY || '';
         if (!apiKey) {
@@ -642,12 +893,35 @@ export default function ChatPanel({ }: ChatPanelProps) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const univerAPI = (window as any).univerAPI;
       if (!univerAPI) {
-        return JSON.stringify({ error: 'Univer API not available yet' });
+        console.error('Tool execution failed: Univer API not available');
+        return JSON.stringify({ error: 'Univer API not available yet. Please wait for the spreadsheet to load.' });
       }
 
       const workbook = univerAPI.getActiveWorkbook();
       if (!workbook) {
-        return JSON.stringify({ error: 'No active workbook found' });
+        console.error('Tool execution failed: No active workbook');
+        return JSON.stringify({ error: 'No active workbook found. Please ensure a spreadsheet is loaded.' });
+      }
+
+      const activeSheet = workbook.getActiveSheet();
+      if (!activeSheet) {
+        console.error('Tool execution failed: No active sheet');
+        return JSON.stringify({ error: 'No active sheet found. Please ensure a sheet is active.' });
+      }
+
+      // Log the actual sheet name for debugging
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const sheetId = (activeSheet as any).getSheetId?.();
+        const sheets = workbook.getSheets();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const foundSheet = sheets.find((s: any) => s.getSheetId?.() === sheetId);
+        if (foundSheet) {
+          const sheetName = typeof foundSheet.getName === 'function' ? foundSheet.getName() : 'Sheet1';
+          console.log(`Tool executing on sheet: "${sheetName}" (ID: ${sheetId})`);
+        }
+      } catch (e) {
+        console.warn('Could not log sheet name:', e);
       }
 
       // Helper to get column letter
@@ -743,13 +1017,175 @@ export default function ChatPanel({ }: ChatPanelProps) {
         // MCP Tools - Data Operations
         case 'set_range_data': {
           try {
-            const startRow = args.startRow as number;
-            const startCol = args.startCol as number;
-            const endRow = args.endRow as number;
-            const endCol = args.endCol as number;
+            // Handle both MCP server format (items) and local format (startRow, startCol, etc.)
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const values = args.values as any;
-            console.log('set_range_data called with:', { startRow, startCol, endRow, endCol, valuesLength: values.length, firstValue: values[0] });
+            let startRow: number, startCol: number, endRow: number, endCol: number, values: any;
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            if ((args as any).items) {
+              // MCP server format: { items: "[{ range: 'B1:B30', value: [...] }]" }
+              console.log('set_range_data: Detected MCP format with items parameter');
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              let itemsData = (args as any).items;
+
+              // Parse items if it's a string
+              if (typeof itemsData === 'string') {
+                try {
+                  // The JSON string contains unquoted JavaScript code like:
+                  // "value": [Math.floor(Math.random() * 1001), ...]
+                  // We need to quote these code strings first, then replace with numbers
+
+                  // Find all unquoted Math.random expressions and quote them
+                  // Pattern matches: Math.floor(Math.random() * 1001) or Math.round(Math.random() * 1000)
+                  const codePattern = /(Math\.(floor|round|random)\(Math\.random\(\)\s*\*\s*\d+\))/g;
+                  let placeholderCounter = 0;
+                  const placeholderMap = new Map<string, number>();
+
+                  const cleanedString = itemsData.replace(codePattern, (match) => {
+                    // Check if already processed
+                    if (!placeholderMap.has(match)) {
+                      placeholderMap.set(match, placeholderCounter++);
+                    }
+                    // Return quoted placeholder that we can identify
+                    return `"__RANDOM_${placeholderMap.get(match)}__"`;
+                  });
+
+                  // Parse the cleaned JSON (now all values are properly quoted)
+                  itemsData = JSON.parse(cleanedString);
+
+                  // Now replace placeholders with actual random numbers recursively
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const replaceRandomNumbers = (obj: any): any => {
+                    if (Array.isArray(obj)) {
+                      return obj.map((item) => {
+                        // Check for placeholder strings like "__RANDOM_0__"
+                        if (typeof item === 'string' && item.startsWith('__RANDOM_') && item.endsWith('__')) {
+                          return Math.floor(Math.random() * 1001);
+                        } else if (typeof item === 'object' && item !== null) {
+                          return replaceRandomNumbers(item);
+                        }
+                        // Check if item is a string containing code
+                        if (typeof item === 'string' && (
+                          item.includes('Math.floor') ||
+                          item.includes('Math.round') ||
+                          item.includes('Math.random')
+                        )) {
+                          return Math.floor(Math.random() * 1001);
+                        }
+                        return item;
+                      });
+                    } else if (typeof obj === 'object' && obj !== null) {
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      const result: any = {};
+                      for (const key in obj) {
+                        if (typeof obj[key] === 'string' && obj[key].startsWith('__RANDOM_') && obj[key].endsWith('__')) {
+                          result[key] = Math.floor(Math.random() * 1001);
+                        } else if (typeof obj[key] === 'string' && (
+                          obj[key].includes('Math.floor') ||
+                          obj[key].includes('Math.round') ||
+                          obj[key].includes('Math.random')
+                        )) {
+                          result[key] = Math.floor(Math.random() * 1001);
+                        } else if (Array.isArray(obj[key]) || (typeof obj[key] === 'object' && obj[key] !== null)) {
+                          result[key] = replaceRandomNumbers(obj[key]);
+                        } else {
+                          result[key] = obj[key];
+                        }
+                      }
+                      return result;
+                    }
+                    return obj;
+                  };
+
+                  itemsData = replaceRandomNumbers(itemsData);
+                } catch (e) {
+                  console.error('Failed to parse items:', e, 'Original string:', itemsData.substring(0, 200));
+                  return JSON.stringify({ error: `Failed to parse items: ${e}` });
+                }
+              }
+
+              // Handle array of items
+              if (Array.isArray(itemsData) && itemsData.length > 0) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const item = itemsData[0] as any;
+
+                // Parse range like "B1:B30"
+                if (item.range) {
+                  const rangeMatch = item.range.match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/);
+                  if (!rangeMatch) {
+                    return JSON.stringify({ error: `Invalid range format: ${item.range}. Expected format: A1:B30` });
+                  }
+
+                  // Convert column letters to numbers
+                  const colToNum = (col: string): number => {
+                    let num = 0;
+                    for (let i = 0; i < col.length; i++) {
+                      num = num * 26 + (col.charCodeAt(i) - 64);
+                    }
+                    return num - 1; // 0-indexed
+                  };
+
+                  startCol = colToNum(rangeMatch[1]);
+                  startRow = parseInt(rangeMatch[2], 10) - 1; // 0-indexed
+                  endCol = colToNum(rangeMatch[3]);
+                  endRow = parseInt(rangeMatch[4], 10) - 1; // 0-indexed
+
+                  // Get values array
+                  values = item.value || item.values;
+
+                  // Filter out any JavaScript/Python code strings and convert to numbers
+                  if (Array.isArray(values)) {
+                    values = values.map((v) => {
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      const val = v as any;
+                      // If it's a string that looks like code, generate random number
+                      if (typeof val === 'string' && (
+                        val.includes('Math.floor') ||
+                        val.includes('Math.random') ||
+                        val.includes('Math.round') ||
+                        val.includes('random()') ||
+                        val.includes('for i in range')
+                      )) {
+                        // Generate actual random number instead (0-1000)
+                        return Math.floor(Math.random() * 1001);
+                      }
+                      // Convert to number if possible
+                      const num = Number(val);
+                      return isNaN(num) ? val : num;
+                    });
+                  }
+
+                  // If values is a string containing Python list comprehension, generate the array
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  if (typeof (item as any).value === 'string' &&
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    (item as any).value.includes('for i in range')) {
+                    // Extract the count from "for i in range(30)"
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const rangeMatch = (item as any).value.match(/range\((\d+)\)/);
+                    if (rangeMatch) {
+                      const count = parseInt(rangeMatch[1], 10);
+                      values = Array.from({ length: count }, () => Math.floor(Math.random() * 1001));
+                      console.log(`Generated ${count} random numbers (0-1000) from Python list comprehension`);
+                    }
+                  }
+                } else {
+                  return JSON.stringify({ error: 'Items format missing range' });
+                }
+              } else {
+                return JSON.stringify({ error: 'Items must be a non-empty array' });
+              }
+            } else {
+              // Local format: { startRow, startCol, endRow, endCol, values }
+              startRow = args.startRow as number;
+              startCol = args.startCol as number;
+              endRow = args.endRow as number;
+              endCol = args.endCol as number;
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              values = args.values as any;
+            }
+
+            console.log('set_range_data called with:', { startRow, startCol, endRow, endCol, valuesLength: values?.length, firstValue: values?.[0] });
             const worksheet = workbook.getActiveSheet();
             // If startRow is 0, assume row 0 is a header, so start from row 1 instead
             const actualStartRow = startRow === 0 ? 1 : startRow;
@@ -958,6 +1394,194 @@ export default function ChatPanel({ }: ChatPanelProps) {
     setIsLoading(false);
   };
 
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Check if it's an Excel file
+    if (!file.name.match(/\.(xlsx|xls)$/i)) {
+      alert('Please upload an Excel file (.xlsx or .xls)');
+      return;
+    }
+
+    setIsUploading(true);
+    const uploadStartTime = Date.now();
+
+    try {
+      // Read file as array buffer
+      const arrayBuffer = await file.arrayBuffer();
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+
+      // Get Univer API
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const univerAPI = (window as any).univerAPI;
+      if (!univerAPI) {
+        alert('Spreadsheet not ready. Please wait a moment and try again.');
+        return;
+      }
+
+      // Get active workbook
+      const activeWorkbook = univerAPI.getActiveWorkbook();
+      if (!activeWorkbook) {
+        alert('Could not access spreadsheet. Please refresh the page.');
+        return;
+      }
+
+      // Clear existing sheets (keep at least one)
+      const existingSheets = activeWorkbook.getSheets();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      existingSheets.forEach((sheet: any, index: number) => {
+        if (index > 0) {
+          try {
+            activeWorkbook.deleteSheet(sheet.getSheetId());
+          } catch {
+            console.warn('Could not delete sheet');
+          }
+        }
+      });
+
+      // Process each sheet in the Excel file
+      workbook.SheetNames.forEach((sheetName, sheetIndex) => {
+        const worksheet = workbook.Sheets[sheetName];
+
+        // Convert sheet to JSON array format
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, {
+          header: 1,
+          defval: '',
+          raw: false
+        }) as string[][];
+
+        // Ensure jsonData is a proper 2D array and pad rows to same length
+        const maxCols = Math.max(...jsonData.map(row => row.length), 0);
+        const paddedData = jsonData.map(row => {
+          const padded = [...row];
+          while (padded.length < maxCols) {
+            padded.push('');
+          }
+          return padded;
+        });
+
+        if (sheetIndex === 0) {
+          // Use the first existing sheet
+          const firstSheet = activeWorkbook.getActiveSheet();
+          if (firstSheet && paddedData.length > 0 && maxCols > 0) {
+            try {
+              // Use batch operation to set all values at once
+              const endRow = paddedData.length - 1;
+              const endCol = maxCols - 1;
+              const range = firstSheet.getRange(0, 0, endRow, endCol);
+
+              // Convert to 2D array of strings for setValues
+              const values2D: string[][] = paddedData.map(row =>
+                row.map(cell => cell !== undefined && cell !== null ? String(cell) : '')
+              );
+
+              // Set all values in one batch operation
+              range.setValues(values2D);
+            } catch (e) {
+              console.warn('Batch setValues failed, falling back to cell-by-cell:', e);
+              // Fallback to cell-by-cell if batch fails
+              paddedData.forEach((row, rowIndex) => {
+                row.forEach((cellValue, colIndex) => {
+                  if (cellValue !== undefined && cellValue !== null && cellValue !== '') {
+                    try {
+                      firstSheet.getRange(rowIndex, colIndex, rowIndex, colIndex).setValue(String(cellValue));
+                    } catch {
+                      // Ignore individual cell errors
+                    }
+                  }
+                });
+              });
+            }
+
+            // Rename the sheet
+            try {
+              firstSheet.setName(sheetName);
+            } catch (e) {
+              console.warn('Could not rename sheet:', e);
+            }
+          }
+        } else {
+          // Create new sheets for additional sheets in the Excel file
+          try {
+            const newSheet = activeWorkbook.insertSheet(sheetName);
+
+            if (paddedData.length > 0 && maxCols > 0) {
+              try {
+                // Use batch operation for new sheets too
+                const endRow = paddedData.length - 1;
+                const endCol = maxCols - 1;
+                const range = newSheet.getRange(0, 0, endRow, endCol);
+
+                // Convert to 2D array of strings
+                const values2D: string[][] = paddedData.map(row =>
+                  row.map(cell => cell !== undefined && cell !== null ? String(cell) : '')
+                );
+
+                // Set all values in one batch operation
+                range.setValues(values2D);
+              } catch (e) {
+                console.warn('Batch setValues failed for new sheet, falling back:', e);
+                // Fallback to cell-by-cell
+                paddedData.forEach((row, rowIndex) => {
+                  row.forEach((cellValue, colIndex) => {
+                    if (cellValue !== undefined && cellValue !== null && cellValue !== '') {
+                      try {
+                        newSheet.getRange(rowIndex, colIndex, rowIndex, colIndex).setValue(String(cellValue));
+                      } catch {
+                        // Ignore individual cell errors
+                      }
+                    }
+                  });
+                });
+              }
+            }
+          } catch (e) {
+            console.warn(`Could not create sheet "${sheetName}":`, e);
+          }
+        }
+      });
+
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+
+      // Trigger save after upload
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (typeof window !== 'undefined' && (window as any).saveWorkbookData) {
+        setTimeout(async () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (window as any).saveWorkbookData();
+        }, 1000);
+      }
+
+      // Show success message with performance info
+      const uploadTime = ((Date.now() - uploadStartTime) / 1000).toFixed(2);
+      const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
+      const message: Message = {
+        role: 'assistant',
+        content: `Successfully loaded "${file.name}" (${fileSizeMB} MB) with ${workbook.SheetNames.length} sheet(s) in ${uploadTime}s.`,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, message]);
+    } catch (error) {
+      console.error('Error loading file:', error);
+      const errorMessage: Message = {
+        role: 'assistant',
+        content: `Failed to load file: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
   const sendMessage = async () => {
     if (!input.trim() || isLoading) return;
 
@@ -965,11 +1589,29 @@ export default function ChatPanel({ }: ChatPanelProps) {
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
+    // Get current sheet context (for AI, not for display)
+    const context = getSheetContext();
+
+    // Store only user's input in the message (clean, no context)
     const userMessage: Message = {
       role: 'user',
-      content: input,
+      content: input.trim(),
       timestamp: new Date(),
     };
+
+    // Update chat title if this is the first user message
+    const userMessages = messages.filter(msg => msg.role === 'user');
+    if (userMessages.length === 0) {
+      // This is the first user message, update chat title
+      const titlePrefix = input.trim().slice(0, 40).replace(/\n/g, ' ').trim();
+      if (titlePrefix) {
+        updateChat(chatId, { title: titlePrefix }).then(() => {
+          if (onChatTitleChange) {
+            onChatTitleChange(titlePrefix);
+          }
+        }).catch(console.error);
+      }
+    }
 
     const updatedMessages = [...messages, userMessage];
     setMessages(updatedMessages);
@@ -993,7 +1635,15 @@ export default function ChatPanel({ }: ChatPanelProps) {
         },
         body: JSON.stringify({
           model: selectedModel,
-          messages: updatedMessages.filter(m => m.role !== 'system').map((m) => ({ role: m.role, content: m.content })),
+          messages: [
+            ...updatedMessages.filter(m => m.role !== 'system').map((m) => {
+              // Add context to the latest user message for AI
+              if (m.role === 'user' && m.content === input.trim() && context) {
+                return { role: 'user' as const, content: `${m.content}\n\n[Current Sheet Context]\n${context}` };
+              }
+              return { role: m.role, content: m.content };
+            }),
+          ],
           tools: getTools(),
           tool_choice: 'auto',
           max_tokens: 4096,
@@ -1062,7 +1712,13 @@ export default function ChatPanel({ }: ChatPanelProps) {
           body: JSON.stringify({
             model: selectedModel,
             messages: [
-              ...updatedMessages.filter(m => m.role !== 'system').map((m) => ({ role: m.role, content: m.content })),
+              ...updatedMessages.filter(m => m.role !== 'system').map((m) => {
+                // Add context to the latest user message for AI
+                if (m.role === 'user' && m.content === input.trim() && context) {
+                  return { role: 'user' as const, content: `${m.content}\n\n[Current Sheet Context]\n${context}` };
+                }
+                return { role: m.role, content: m.content };
+              }),
               { role: 'assistant', tool_calls: data.choices[0].message.tool_calls },
               ...toolResponses,
             ],
@@ -1123,7 +1779,13 @@ export default function ChatPanel({ }: ChatPanelProps) {
             body: JSON.stringify({
               model: selectedModel,
               messages: [
-                ...updatedMessages.filter(m => m.role !== 'system').map((m) => ({ role: m.role, content: m.content })),
+                ...updatedMessages.filter(m => m.role !== 'system').map((m) => {
+                  // Add context to the latest user message for AI
+                  if (m.role === 'user' && m.content === input.trim() && context) {
+                    return { role: 'user' as const, content: `${m.content}\n\n[Current Sheet Context]\n${context}` };
+                  }
+                  return { role: m.role, content: m.content };
+                }),
                 { role: 'assistant', tool_calls: data.choices[0].message.tool_calls },
                 ...toolResponses,
                 { role: 'assistant', tool_calls: followUpData.choices[0].message.tool_calls },
@@ -1143,6 +1805,15 @@ export default function ChatPanel({ }: ChatPanelProps) {
             timestamp: new Date(),
           };
           setMessages((prev) => [...prev, finalMessage]);
+
+          // Trigger save after operations
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          if (typeof window !== 'undefined' && (window as any).saveWorkbookData) {
+            setTimeout(async () => {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              await (window as any).saveWorkbookData();
+            }, 500);
+          }
         } else {
           const finalMessage: Message = {
             role: 'assistant',
@@ -1150,6 +1821,15 @@ export default function ChatPanel({ }: ChatPanelProps) {
             timestamp: new Date(),
           };
           setMessages((prev) => [...prev, finalMessage]);
+
+          // Trigger save after operations
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          if (typeof window !== 'undefined' && (window as any).saveWorkbookData) {
+            setTimeout(async () => {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              await (window as any).saveWorkbookData();
+            }, 500);
+          }
         }
       } else {
         // Direct response without tools
@@ -1181,6 +1861,65 @@ export default function ChatPanel({ }: ChatPanelProps) {
 
   return (
     <div className="flex flex-col h-full bg-[#FAFAFA]">
+      {/* Top Bar - Cursor style with browser tabs */}
+      <div className="border-b border-[#E0E0E0] bg-white">
+        {/* Tabs container */}
+        <div className="flex items-end overflow-x-auto scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+          <div className="flex items-end min-w-full">
+            {allChats.map((chat) => (
+              <div
+                key={chat.id}
+                className={`group relative flex items-center border-b-2 ${chat.id === chatId
+                  ? 'text-[#0066CC] border-[#0066CC] bg-white'
+                  : 'text-[#666666] border-transparent hover:text-[#333333] hover:border-[#D0D0D0]'
+                  }`}
+              >
+                <button
+                  onClick={() => {
+                    if (onSelectChat) {
+                      onSelectChat(chat.id);
+                    }
+                  }}
+                  className="px-4 py-2.5 text-sm font-medium transition-colors whitespace-nowrap flex items-center gap-2"
+                >
+                  <span className="truncate max-w-[200px] block">{chat.title || 'New Chat'}</span>
+                </button>
+                {onDeleteChat && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (window.confirm('Are you sure you want to delete this chat?')) {
+                        onDeleteChat(chat.id);
+                      }
+                    }}
+                    className="opacity-0 group-hover:opacity-100 p-1 mr-2 hover:bg-[#F0F0F0] rounded transition-all"
+                    title="Delete chat"
+                  >
+                    <svg className="w-3.5 h-3.5 text-[#999999] hover:text-[#666666]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            ))}
+
+            {/* Plus button for new chat */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onCreateNewChat();
+              }}
+              className="p-2 text-[#666666] hover:text-[#333333] hover:bg-[#F0F0F0] transition-colors border-b-2 border-transparent"
+              title="New Chat"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-4 py-6">
@@ -1207,7 +1946,7 @@ export default function ChatPanel({ }: ChatPanelProps) {
                       : 'bg-white text-[#333333] border border-[#E0E0E0]'
                       }`}>
                       <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">
-                        {message.content}
+                        {cleanMessageContent(message.content)}
                       </p>
                     </div>
                   </div>
@@ -1307,14 +2046,32 @@ export default function ChatPanel({ }: ChatPanelProps) {
 
             {/* Right side - Action buttons */}
             <div className="flex items-center gap-1">
+              {/* Hidden file input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
+
               {/* Upload document button */}
               <button
-                className="p-1.5 text-[#666666] hover:text-[#333333] hover:bg-[#F0F0F0] rounded transition-colors"
-                title="Upload document"
+                onClick={handleUploadClick}
+                disabled={isUploading}
+                className="p-1.5 text-[#666666] hover:text-[#333333] hover:bg-[#F0F0F0] rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title={isUploading ? 'Uploading file...' : 'Upload Excel file (.xlsx, .xls)'}
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                </svg>
+                {isUploading ? (
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                )}
               </button>
 
               {/* Send/Stop button */}

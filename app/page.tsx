@@ -85,7 +85,7 @@ export default function Home() {
             <div className="absolute inset-y-0 -inset-x-1 z-10" />
             {/* Visual indicator */}
             <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-0.5 bg-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-          </div>
+        </div>
           
           <div 
             className="border-l border-gray-200 bg-white flex flex-col"
@@ -98,7 +98,7 @@ export default function Home() {
               getColumnLetter={getColumnLetter}
               activeSheetName={activeSheetName}
             />
-          </div>
+        </div>
         </>
       )}
     </div>
