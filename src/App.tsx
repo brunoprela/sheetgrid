@@ -37,7 +37,6 @@ function App() {
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [activeChatTitle, setActiveChatTitle] = useState<string>('New Chat');
   const [allChats, setAllChats] = useState<Chat[]>([]);
-  const [showUserProfile, setShowUserProfile] = useState(false);
   const isResizingRef = useRef(false);
 
   // Save chat width to localStorage whenever it changes
@@ -267,14 +266,14 @@ function App() {
 
   // Allow scrolling on landing/sign-in pages when zoomed, prevent it on main app
   useEffect(() => {
-    if (showLanding || showSignIn) {
+    if (showLanding || showSignIn || location.pathname === '/profile') {
       document.documentElement.style.overflow = 'auto';
       document.body.style.overflow = 'auto';
     } else {
       document.documentElement.style.overflow = 'hidden';
       document.body.style.overflow = 'hidden';
     }
-  }, [showLanding, showSignIn]);
+  }, [showLanding, showSignIn, location.pathname]);
 
   // Reset sign-in page when user signs in
   useEffect(() => {
@@ -286,6 +285,11 @@ function App() {
   // Handler routes (like /handler/oauth-callback) must be handled by StackHandler
   if (isHandlerRoute) {
     return <HandlerRoutes />;
+  }
+
+  // Show profile page if on /profile route and user is signed in
+  if (location.pathname === '/profile' && user) {
+    return <UserProfile />;
   }
 
   // Show sign-in page if requested
@@ -312,7 +316,7 @@ function App() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <AuthButton onShowProfile={() => setShowUserProfile(true)} />
+          <AuthButton />
         </div>
       </div>
 
@@ -357,11 +361,6 @@ function App() {
           </>
         )}
       </div>
-
-      {/* User Profile Modal */}
-      {showUserProfile && user && (
-        <UserProfile onClose={() => setShowUserProfile(false)} />
-      )}
     </div>
   );
 }

@@ -3,6 +3,7 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  color-scheme: light;
 }
 
 @theme inline {
@@ -12,10 +13,12 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/* Disable dark mode to prevent illegible text */
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #ffffff;
+    --foreground: #171717;
+    color-scheme: light;
   }
 }
 
@@ -42,6 +45,198 @@ body {
   overscroll-behavior-x: none;
   overscroll-behavior-y: auto;
   touch-action: pan-y pinch-zoom;
+}
+
+/* Force light theme for Stack Auth components */
+[data-stack-auth],
+[data-stack-theme="dark"],
+[class*="stack-"] {
+  color-scheme: light !important;
+}
+
+/* Ensure text is readable in Stack Auth components - but preserve white text for badges/labels */
+[class*="stack-"] *:not(button):not([class*="badge"]):not([class*="Badge"]):not([class*="label"]):not([class*="Label"]):not([class*="pill"]):not([class*="Pill"]):not([class*="tag"]):not([class*="Tag"]):not([style*="background"]):not([data-active="true"]):not([aria-current="page"]):not([role="menuitem"][aria-selected="true"]) {
+  color: #000000 !important;
+}
+
+/* Fix for Stack Auth AccountSettings specifically */
+[class*="AccountSettings"],
+[class*="account-settings"] {
+  background: white !important;
+}
+
+/* Ensure inputs are readable */
+[class*="AccountSettings"] input,
+[class*="AccountSettings"] select,
+[class*="AccountSettings"] textarea,
+[class*="account-settings"] input,
+[class*="account-settings"] select,
+[class*="account-settings"] textarea {
+  background: white !important;
+  color: #000000 !important;
+  border-color: #d1d5db !important;
+}
+
+/* Fix input placeholders */
+[class*="AccountSettings"] input::placeholder,
+[class*="account-settings"] input::placeholder {
+  color: #9ca3af !important;
+}
+
+/* Fix icons and SVG elements */
+[class*="AccountSettings"] svg:not(button svg),
+[class*="account-settings"] svg:not(button svg),
+[class*="AccountSettings"] path:not(button path),
+[class*="account-settings"] path:not(button path) {
+  color: #000000 !important;
+  fill: currentColor !important;
+}
+
+/* Fix selected tabs */
+[class*="AccountSettings"] [aria-selected="true"]:not(button),
+[class*="account-settings"] [aria-selected="true"]:not(button) {
+  background-color: #f3f4f6 !important;
+}
+
+/* Make all button text and icons white */
+[class*="AccountSettings"] button,
+[class*="account-settings"] button,
+[class*="AccountSettings"] button *,
+[class*="account-settings"] button *,
+[class*="AccountSettings"] button svg,
+[class*="account-settings"] button svg,
+[class*="AccountSettings"] button path,
+[class*="account-settings"] button path,
+[class*="AccountSettings"] button span,
+[class*="account-settings"] button span {
+  color: #ffffff !important;
+  fill: #ffffff !important;
+}
+
+/* Fix any element with inline background color style that might be blue - white text */
+[class*="AccountSettings"] [style*="background"]:not(button):not(input):not(select):not(textarea):not([style*="rgba(0,0,0"]):not([style*="rgb(0,0,0"]):not([style*="#000"]):not([style*="black"]):not([style*="transparent"]),
+[class*="account-settings"] [style*="background"]:not(button):not(input):not(select):not(textarea):not([style*="rgba(0,0,0"]):not([style*="rgb(0,0,0"]):not([style*="#000"]):not([style*="black"]):not([style*="transparent"]) {
+  color: #ffffff !important;
+}
+
+/* Fix badges, labels, and pills - make text white on colored backgrounds (but not black backgrounds or buttons) */
+[class*="AccountSettings"] [class*="badge"]:not([style*="background"]):not(button),
+[class*="account-settings"] [class*="badge"]:not([style*="background"]):not(button),
+[class*="AccountSettings"] [class*="Badge"]:not([style*="background"]):not(button),
+[class*="account-settings"] [class*="Badge"]:not([style*="background"]):not(button),
+[class*="AccountSettings"] [class*="label"]:not([style*="background"]):not(button),
+[class*="account-settings"] [class*="label"]:not([style*="background"]):not(button),
+[class*="AccountSettings"] [class*="Label"]:not([style*="background"]):not(button),
+[class*="account-settings"] [class*="Label"]:not([style*="background"]):not(button),
+[class*="AccountSettings"] [class*="pill"]:not([style*="background"]):not(button),
+[class*="account-settings"] [class*="pill"]:not([style*="background"]):not(button),
+[class*="AccountSettings"] [class*="Pill"]:not([style*="background"]):not(button),
+[class*="account-settings"] [class*="Pill"]:not([style*="background"]):not(button),
+[class*="AccountSettings"] [class*="tag"]:not([style*="background"]):not(button),
+[class*="account-settings"] [class*="tag"]:not([style*="background"]):not(button),
+[class*="AccountSettings"] [class*="Tag"]:not([style*="background"]):not(button),
+[class*="account-settings"] [class*="Tag"]:not([style*="background"]):not(button) {
+  color: #ffffff !important;
+}
+
+/* Fix any badge/pill with black background - make it white background with black text */
+[class*="AccountSettings"] [style*="rgba(0,0,0"],
+[class*="account-settings"] [style*="rgba(0,0,0"],
+[class*="AccountSettings"] [style*="rgb(0,0,0"],
+[class*="account-settings"] [style*="rgb(0,0,0"],
+[class*="AccountSettings"] [style*="#000"],
+[class*="account-settings"] [style*="#000"],
+[class*="AccountSettings"] [style*="black"],
+[class*="account-settings"] [style*="black"],
+/* Also match hex codes like #000000, #0a0a0a, etc */
+[class*="AccountSettings"] [style*="#00"],
+[class*="account-settings"] [style*="#00"],
+[class*="AccountSettings"] [style*="#0a"],
+[class*="account-settings"] [style*="#0a"],
+[class*="AccountSettings"] [style*="#1a"],
+[class*="account-settings"] [style*="#1a"],
+[class*="AccountSettings"] [style*="#2a"],
+[class*="account-settings"] [style*="#2a"] {
+  background: white !important;
+  background-color: white !important;
+  color: #000000 !important;
+}
+
+[class*="AccountSettings"] [style*="rgba(0,0,0"] *,
+[class*="account-settings"] [style*="rgba(0,0,0"] *,
+[class*="AccountSettings"] [style*="rgb(0,0,0"] *,
+[class*="account-settings"] [style*="rgb(0,0,0"] *,
+[class*="AccountSettings"] [style*="#000"] *,
+[class*="account-settings"] [style*="#000"] *,
+[class*="AccountSettings"] [style*="black"] *,
+[class*="account-settings"] [style*="black"] *,
+/* Also match hex codes like #000000, #0a0a0a, etc */
+[class*="AccountSettings"] [style*="#00"] *,
+[class*="account-settings"] [style*="#00"] *,
+[class*="AccountSettings"] [style*="#0a"] *,
+[class*="account-settings"] [style*="#0a"] *,
+[class*="AccountSettings"] [style*="#1a"] *,
+[class*="account-settings"] [style*="#1a"] *,
+[class*="AccountSettings"] [style*="#2a"] *,
+[class*="account-settings"] [style*="#2a"] * {
+  color: #000000 !important;
+}
+
+/* Nuclear option for ANY element with any inline background that's dark - force white background and black text */
+[class*="AccountSettings"] [style*="background"]:not(button):not(input):not(select):not(textarea):not([style*="rgb(255"]):not([style*="rgba(255"]):not([style*="#fff"]):not([style*="#FFF"]):not([style*="white"]):not([style*="transparent"]),
+[class*="account-settings"] [style*="background"]:not(button):not(input):not(select):not(textarea):not([style*="rgb(255"]):not([style*="rgba(255"]):not([style*="#fff"]):not([style*="#FFF"]):not([style*="white"]):not([style*="transparent"]) {
+  background: white !important;
+  background-color: white !important;
+  color: #000000 !important;
+}
+
+[class*="AccountSettings"] [style*="background"]:not(button):not(input):not(select):not(textarea):not([style*="rgb(255"]):not([style*="rgba(255"]):not([style*="#fff"]):not([style*="#FFF"]):not([style*="white"]):not([style*="transparent"]) *,
+[class*="account-settings"] [style*="background"]:not(button):not(input):not(select):not(textarea):not([style*="rgb(255"]):not([style*="rgba(255"]):not([style*="#fff"]):not([style*="#FFF"]):not([style*="white"]):not([style*="transparent"]) * {
+  color: #000000 !important;
+}
+
+/* Fix navigation items - any element with data-attribute indicating active state */
+[class*="AccountSettings"] [data-active="true"],
+[class*="account-settings"] [data-active="true"],
+[class*="AccountSettings"] [aria-current="page"],
+[class*="account-settings"] [aria-current="page"],
+[class*="AccountSettings"] [role="menuitem"][aria-selected="true"],
+[class*="account-settings"] [role="menuitem"][aria-selected="true"] {
+  color: #ffffff !important;
+}
+
+/* Fix tooltips and dropdowns specifically */
+[class*="AccountSettings"] [role="tooltip"],
+[class*="account-settings"] [role="tooltip"],
+[class*="AccountSettings"] [role="menu"],
+[class*="account-settings"] [role="menu"],
+[class*="AccountSettings"] [role="menuitem"],
+[class*="account-settings"] [role="menuitem"],
+[class*="AccountSettings"] [role="listbox"],
+[class*="account-settings"] [role="listbox"] {
+  background: white !important;
+  background-color: white !important;
+  color: #000000 !important;
+}
+
+[class*="AccountSettings"] [role="tooltip"] *,
+[class*="account-settings"] [role="tooltip"] *,
+[class*="AccountSettings"] [role="menu"] *,
+[class*="account-settings"] [role="menu"] *,
+[class*="AccountSettings"] [role="menuitem"] *,
+[class*="account-settings"] [role="menuitem"] *,
+[class*="AccountSettings"] [role="listbox"] *,
+[class*="account-settings"] [role="listbox"] * {
+  color: #000000 !important;
+}
+
+/* Nuclear option: force all text elements to be black (except buttons, inputs, selects, textareas, and anything already set to white above) */
+[class*="AccountSettings"] *:not(button):not(input):not(select):not(textarea):not([type="submit"]):not([type="button"]):not([class*="badge"]):not([class*="Badge"]):not([class*="label"]):not([class*="Label"]):not([class*="pill"]):not([class*="Pill"]):not([class*="tag"]):not([class*="Tag"]):not([style*="background"]) {
+  color: #000000 !important;
+}
+
+[class*="account-settings"] *:not(button):not(input):not(select):not(textarea):not([type="submit"]):not([type="button"]):not([class*="badge"]):not([class*="Badge"]):not([class*="label"]):not([class*="Label"]):not([class*="pill"]):not([class*="Pill"]):not([class*="tag"]):not([class*="Tag"]):not([style*="background"]) {
+  color: #000000 !important;
 }
 
 /* Fix Univer status bar overflow */
@@ -96,3 +291,5 @@ div[role="status"],
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+
+

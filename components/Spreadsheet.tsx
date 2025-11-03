@@ -26,6 +26,7 @@ import { UniverSheetsCrosshairHighlightPlugin } from '@univerjs/sheets-crosshair
 import UniverSheetsCrosshairHighlightEnUS from '@univerjs/sheets-crosshair-highlight/locale/en-US';
 import { UniverSheetsZenEditorPlugin } from '@univerjs/sheets-zen-editor';
 import UniverSheetsZenEditorEnUS from '@univerjs/sheets-zen-editor/locale/en-US';
+import UniverSheetsUIEnUS from '@univerjs/sheets-ui/locale/en-US';
 import { UniverMCPPlugin } from '@univerjs-pro/mcp';
 import { UniverMCPUIPlugin } from '@univerjs-pro/mcp-ui';
 import univerMCPUIEnUS from '@univerjs-pro/mcp-ui/locale/en-US';
@@ -44,9 +45,36 @@ import '@univerjs/presets/lib/styles/preset-sheets-data-validation.css';
 import '@univerjs/presets/lib/styles/preset-sheets-drawing.css';
 import '@univerjs-pro/mcp-ui/lib/index.css';
 
-// Define merge function to match start kit
+// Define merge function with deep merging for nested objects
 const merge = <T extends Record<string, any>>(target: T, ...sources: any[]): T => {
-  return Object.assign({}, target, ...sources);
+  const result: any = { ...target };
+  
+  for (const source of sources) {
+    if (!source) continue;
+    
+    for (const key in source) {
+      if (source.hasOwnProperty(key)) {
+        const sourceValue = source[key];
+        const targetValue = result[key];
+        
+        // Deep merge if both values are objects and not arrays
+        if (
+          typeof sourceValue === 'object' &&
+          sourceValue !== null &&
+          !Array.isArray(sourceValue) &&
+          typeof targetValue === 'object' &&
+          targetValue !== null &&
+          !Array.isArray(targetValue)
+        ) {
+          result[key] = merge(targetValue, sourceValue);
+        } else {
+          result[key] = sourceValue;
+        }
+      }
+    }
+  }
+  
+  return result;
 };
 
 interface SpreadsheetProps {}
@@ -201,6 +229,7 @@ export default function Spreadsheet({}: SpreadsheetProps) {
           UniverPresetSheetsConditionalFormattingEnUS,
           UniverPresetSheetsDataValidationEnUS,
           UniverSheetsCrosshairHighlightEnUS,
+          UniverSheetsUIEnUS,
           UniverSheetsZenEditorEnUS,
           univerMCPUIEnUS,
         ),
