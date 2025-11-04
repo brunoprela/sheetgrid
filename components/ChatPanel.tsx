@@ -950,17 +950,77 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
 
         // Don't retry on client errors (4xx), only retry on server errors (5xx) and network errors
         if (response.status >= 400 && response.status < 500 && response.status !== 408) {
-          // Don't retry on 408 (Request Timeout) as it might be recoverable
-          throw new Error(`Client error: ${response.status} ${response.statusText}`);
+          // Read error response body to get detailed error message
+          let errorMessage = `Client error: ${response.status} ${response.statusText}`;
+          try {
+            const errorData = await response.json();
+            const openRouterError = errorData.error?.message || errorData.message || errorData.error || JSON.stringify(errorData);
+            errorMessage = `Client error: ${response.status} ${response.statusText} - ${openRouterError}`;
+            console.error('OpenRouter API Error Details:', {
+              status: response.status,
+              statusText: response.statusText,
+              error: errorData,
+              url: url,
+              attempt: attempt + 1,
+            });
+          } catch (parseError) {
+            // If JSON parsing fails, try to get text response
+            try {
+              const errorText = await response.text();
+              errorMessage = `Client error: ${response.status} ${response.statusText} - ${errorText.substring(0, 500)}`;
+              console.error('OpenRouter API Error (non-JSON):', {
+                status: response.status,
+                statusText: response.statusText,
+                body: errorText.substring(0, 500),
+                url: url,
+                attempt: attempt + 1,
+              });
+            } catch (textError) {
+              // If even text parsing fails, use status only
+              console.error('OpenRouter API Error (could not parse response):', {
+                status: response.status,
+                statusText: response.statusText,
+                url: url,
+                attempt: attempt + 1,
+              });
+            }
+          }
+          throw new Error(errorMessage);
         }
 
-        lastError = new Error(`Server error: ${response.status} ${response.statusText}`);
+        // For server errors (5xx), read error but still retry
+        let serverErrorMessage = `Server error: ${response.status} ${response.statusText}`;
+        try {
+          const errorData = await response.json();
+          const openRouterError = errorData.error?.message || errorData.message || errorData.error;
+          if (openRouterError) {
+            serverErrorMessage = `Server error: ${response.status} ${response.statusText} - ${openRouterError}`;
+          }
+          console.warn('OpenRouter API Server Error:', {
+            status: response.status,
+            statusText: response.statusText,
+            error: errorData,
+            url: url,
+            attempt: attempt + 1,
+          });
+        } catch {
+          // Ignore parsing errors for server errors, we'll retry anyway
+        }
+        lastError = new Error(serverErrorMessage);
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
+
+        // Check if this is a client error - don't retry, throw immediately
+        if (error instanceof Error && error.message.includes('Client error')) {
+          console.error('Client error detected, not retrying:', error.message);
+          throw error;
+        }
+
+        // For other errors, retry if we have attempts left
         if (attempt < retries - 1) {
           // Exponential backoff: 1s, 2s, 4s
           const delay = Math.pow(2, attempt) * 1000;
-          console.warn(`API call failed, retrying in ${delay}ms... (attempt ${attempt + 1}/${retries})`);
+          console.warn(`API call failed, retrying in ${delay}ms... (attempt ${attempt + 1}/${retries})`, lastError.message);
           await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
