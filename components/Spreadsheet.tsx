@@ -282,7 +282,7 @@ export default function Spreadsheet({ }: SpreadsheetProps) {
       ],
     });
 
-    // Function to save workbook data to IndexedDB
+    // Function to save workbook data to IndexedDB using Univer's official save() method
     const saveWorkbookData = async () => {
       // Don't save while data is still loading to prevent overwriting saved data with empty workbook
       if (isLoadingDataRef.current) {
@@ -297,73 +297,22 @@ export default function Spreadsheet({ }: SpreadsheetProps) {
           return;
         }
 
-        const sheets = workbook.getSheets();
-        if (!sheets || sheets.length === 0) {
-          console.warn('No sheets available for saving');
+        // Use Univer's official save() method to get complete workbook snapshot
+        const workbookSnapshot = workbook.save();
+
+        if (!workbookSnapshot) {
+          console.warn('Failed to get workbook snapshot');
           return;
         }
 
-        // Use sheet names as keys (more stable than IDs)
-        const workbookData: { [sheetName: string]: { name: string; data: any[][] } } = {};
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        sheets.forEach((sheet: any) => {
-          try {
-            const sheetName = sheet.getName?.() || 'Sheet';
-
-            // Get all data from the sheet
-            let allData: any[][] = [];
-            const maxRowsToRead = 10000;
-            const maxColsToRead = 100;
-
-            try {
-              const range = sheet.getRange(0, 0, maxRowsToRead - 1, maxColsToRead - 1);
-              const values = range.getValues();
-              allData = values || [];
-
-              // Trim empty rows from the end
-              while (allData.length > 0 && allData[allData.length - 1].every(cell => !cell || cell === '')) {
-                allData.pop();
-              }
-            } catch (e) {
-              console.warn('Could not read all sheet data, reading cell by cell:', e);
-              // Fallback: read smaller chunks
-              for (let row = 0; row < Math.min(1000, maxRowsToRead); row++) {
-                const rowData: any[] = [];
-                for (let col = 0; col < Math.min(50, maxColsToRead); col++) {
-                  try {
-                    const cellRange = sheet.getRange(row, col);
-                    const value = cellRange.getValue();
-                    rowData.push(value !== null && value !== undefined ? value : '');
-                  } catch {
-                    rowData.push('');
-                  }
-                }
-                if (rowData.some(cell => cell !== '')) {
-                  allData.push(rowData);
-                } else if (row > 100 && allData.length > 0) {
-                  // Stop if we hit many empty rows
-                  break;
-                }
-              }
-            }
-
-            workbookData[sheetName] = {
-              name: sheetName,
-              data: allData,
-            };
-          } catch (e) {
-            console.warn('Error saving sheet data:', e);
-          }
-        });
-
         // Save to IndexedDB
         if (typeof window !== 'undefined') {
-          await saveWorkbookDataToIndexedDB(workbookData);
+          await saveWorkbookDataToIndexedDB(workbookSnapshot);
           console.log('✅ Workbook data saved to IndexedDB:', {
-            sheetCount: Object.keys(workbookData).length,
-            sheetNames: Object.keys(workbookData),
-            totalRows: Object.values(workbookData).reduce((sum, sheet) => sum + (sheet.data?.length || 0), 0),
+            workbookId: workbookSnapshot.id,
+            workbookName: workbookSnapshot.name,
+            sheetCount: workbookSnapshot.sheetOrder?.length || 0,
+            sheetNames: workbookSnapshot.sheetOrder || [],
             timestamp: new Date().toISOString(),
           });
         }
@@ -372,7 +321,7 @@ export default function Spreadsheet({ }: SpreadsheetProps) {
       }
     };
 
-    // Function to load workbook data from IndexedDB
+    // Function to load workbook data from IndexedDB using Univer's official createWorkbook() method
     const loadWorkbookData = async () => {
       try {
         if (typeof window === 'undefined') return;
@@ -386,138 +335,39 @@ export default function Spreadsheet({ }: SpreadsheetProps) {
           return;
         }
 
-        const workbookData: { [sheetName: string]: { name: string; data: any[][] } } = savedData;
-        const sheetNames = Object.keys(workbookData);
+        // Check if savedData is in the old format (custom format) or new format (IWorkbookData)
+        // If it has sheets property and sheetOrder, it's IWorkbookData
+        // If it has sheet names as keys, it's the old format
+        let workbookData: any = savedData;
 
-        if (sheetNames.length === 0) {
-          console.log('Empty saved data, creating empty workbook');
+        if (!savedData.sheets || !savedData.sheetOrder) {
+          // Old format detected - log warning but continue with empty workbook
+          console.warn('Old data format detected, creating empty workbook. Please re-save your data.');
           univer.createUnit(UniverInstanceType.UNIVER_SHEET, {});
-          // Mark loading as complete immediately since there's nothing to load
           isLoadingDataRef.current = false;
           return;
         }
 
         console.log('Loading workbook data from IndexedDB:', {
-          sheetCount: sheetNames.length,
-          sheetNames: sheetNames,
+          workbookId: workbookData.id,
+          workbookName: workbookData.name,
+          sheetCount: workbookData.sheetOrder?.length || 0,
+          sheetNames: workbookData.sheetOrder || [],
         });
 
-        // Create workbook with first sheet
-        const firstSheetData = workbookData[sheetNames[0]];
-        univer.createUnit(UniverInstanceType.UNIVER_SHEET, {});
-
-        // Wait for workbook to be ready with retries
-        let retries = 0;
-        const maxRetries = 50; // Increased retries for slower systems
-        const tryLoadData = () => {
-          try {
-            const workbook = univerAPI.getActiveWorkbook();
-            if (!workbook) {
-              retries++;
-              if (retries < maxRetries) {
-                setTimeout(tryLoadData, 100); // Faster retry interval
-                return;
-              } else {
-                console.error('Workbook not ready after max retries. Retrying load...');
-                // Try one more time after a longer delay
-                setTimeout(() => {
-                  const workbook = univerAPI.getActiveWorkbook();
-                  if (workbook) {
-                    tryLoadData();
-                  } else {
-                    console.error('Failed to load workbook after extended retry');
-                    // Mark loading as complete even if we can't load to prevent blocking saves forever
-                    isLoadingDataRef.current = false;
-                  }
-                }, 1000);
-                return;
-              }
-            }
-
-            // Load first sheet
-            const firstSheet = workbook.getActiveSheet();
-            if (firstSheet && firstSheetData && firstSheetData.data && firstSheetData.data.length > 0) {
-              try {
-                const data = firstSheetData.data;
-                const maxRow = data.length - 1;
-                const maxCol = Math.max(...data.map(row => row.length || 0), 0) - 1;
-
-                if (maxRow >= 0 && maxCol >= 0) {
-                  // Pad rows to same length
-                  const paddedData = data.map(row => {
-                    const padded = [...row];
-                    while (padded.length < maxCol + 1) {
-                      padded.push('');
-                    }
-                    return padded.map(cell => cell !== null && cell !== undefined ? String(cell) : '');
-                  });
-
-                  const range = firstSheet.getRange(0, 0, maxRow, maxCol);
-                  range.setValues(paddedData);
-                  console.log(`Loaded ${paddedData.length} rows × ${maxCol + 1} cols into first sheet`);
-
-                  // Rename sheet if name differs
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  const currentName = (firstSheet as any).getName?.() || 'Sheet';
-                  if (firstSheetData.name && currentName !== firstSheetData.name) {
-                    try {
-                      firstSheet.setName(firstSheetData.name);
-                    } catch (e) {
-                      console.warn('Could not rename sheet:', e);
-                    }
-                  }
-                }
-              } catch (e) {
-                console.error('Error loading first sheet data:', e);
-              }
-            }
-
-            // Create additional sheets
-            sheetNames.slice(1).forEach((sheetName, index) => {
-              const sheetData = workbookData[sheetName];
-              if (!sheetData) return;
-
-              try {
-                const newSheet = workbook.insertSheet(sheetData.name || sheetName || `Sheet${index + 2}`);
-
-                if (sheetData.data && sheetData.data.length > 0) {
-                  const data = sheetData.data;
-                  const maxRow = data.length - 1;
-                  const maxCol = Math.max(...data.map(row => row.length || 0), 0) - 1;
-
-                  if (maxRow >= 0 && maxCol >= 0) {
-                    // Pad rows to same length
-                    const paddedData = data.map(row => {
-                      const padded = [...row];
-                      while (padded.length < maxCol + 1) {
-                        padded.push('');
-                      }
-                      return padded.map(cell => cell !== null && cell !== undefined ? String(cell) : '');
-                    });
-
-                    const range = newSheet.getRange(0, 0, maxRow, maxCol);
-                    range.setValues(paddedData);
-                    console.log(`Loaded ${paddedData.length} rows × ${maxCol + 1} cols into sheet "${sheetData.name}"`);
-                  }
-                }
-              } catch (e) {
-                console.error(`Error creating sheet ${sheetData.name}:`, e);
-              }
-            });
-
-            console.log('✅ Workbook data loaded successfully from IndexedDB');
-            // Mark loading as complete - safe to save now
-            isLoadingDataRef.current = false;
-          } catch (error) {
-            console.error('❌ Error loading workbook data:', error);
-            // Mark loading as complete even on error so we don't block saves forever
-            isLoadingDataRef.current = false;
-          }
-        };
-
-        // Start loading after a delay to ensure workbook is ready
-        // Increased delay to give Univer time to fully initialize
-        setTimeout(tryLoadData, 500);
+        // Use Univer's official createWorkbook() method to restore the complete workbook
+        try {
+          const createdWorkbook = univerAPI.createWorkbook(workbookData);
+          console.log('✅ Workbook created from saved data:', createdWorkbook?.getId());
+          // Mark loading as complete - safe to save now
+          isLoadingDataRef.current = false;
+        } catch (error) {
+          console.error('❌ Error creating workbook from saved data:', error);
+          // Fallback to empty workbook
+          univer.createUnit(UniverInstanceType.UNIVER_SHEET, {});
+          // Mark loading as complete even on error so we don't block saves forever
+          isLoadingDataRef.current = false;
+        }
 
       } catch (error) {
         console.error('Error loading workbook from IndexedDB:', error);
