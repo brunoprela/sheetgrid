@@ -619,14 +619,72 @@ export default function Spreadsheet({ }: SpreadsheetProps) {
         if (saveTimeout) clearTimeout(saveTimeout);
         saveTimeout = setTimeout(async () => {
           await saveWorkbookData();
-        }, 2000); // Save 2 seconds after last change
+        }, 500); // Save 500ms after last change (reduced for faster saves)
       };
 
-      // Listen for changes (we'll poll since Univer might not expose change events directly)
-      // Save periodically and after operations
+      // Immediate save function (no debounce)
+      const immediateSave = async () => {
+        if (saveTimeout) clearTimeout(saveTimeout);
+        await saveWorkbookData();
+      };
+
+      // Listen for keyboard events that finalize cell edits
+      const handleCellEditFinish = (e: KeyboardEvent) => {
+        // Enter, Tab, Escape typically finalize cell edits in spreadsheets
+        if (e.key === 'Enter' || e.key === 'Tab' || e.key === 'Escape') {
+          // Save immediately when cell edit is finalized
+          immediateSave().catch(console.error);
+        }
+      };
+      window.addEventListener('keydown', handleCellEditFinish);
+
+      // Also save when user clicks outside the spreadsheet (blur)
+      const handleWindowBlur = () => {
+        immediateSave().catch(console.error);
+      };
+      window.addEventListener('blur', handleWindowBlur);
+
+      // Store handlers for cleanup
+      (univerInstanceRef.current as any).cellEditFinishHandler = handleCellEditFinish;
+      (univerInstanceRef.current as any).windowBlurHandler = handleWindowBlur;
+
+      // Try to listen to Univer's command execution events if available
+      // Wait a bit for workbook to be ready
+      setTimeout(() => {
+        try {
+          const workbook = univerAPI.getActiveWorkbook();
+          // Use type assertion since getCommandService might not be in types but could exist at runtime
+          const commandService = (workbook as any)?.getCommandService?.();
+          if (commandService && typeof commandService.onCommandExecuted === 'function') {
+            // Listen for set range values command (cell edits)
+            const dispose = commandService.onCommandExecuted((commandInfo: any) => {
+              if (commandInfo?.id && (
+                commandInfo.id === 'sheet.command.set-range-values' ||
+                commandInfo.id === 'sheet.operation.set-range-values' ||
+                commandInfo.id.includes('set-range') ||
+                commandInfo.id.includes('set-value') ||
+                commandInfo.id.includes('set-range-values')
+              )) {
+                console.log('Cell edit detected via command event, triggering save');
+                debouncedSave();
+              }
+            });
+            // Store dispose function for cleanup (if available)
+            if (typeof dispose === 'function') {
+              if (!univerInstanceRef.current) univerInstanceRef.current = { univerAPI, univer };
+              (univerInstanceRef.current as any).commandDispose = dispose;
+            }
+          }
+        } catch (e) {
+          console.log('Could not hook into Univer command events:', e);
+        }
+      }, 1000); // Wait 1 second for workbook to be ready
+
+      // Listen for changes (polling as fallback)
+      // Save more frequently to catch changes quickly
       autoSaveInterval = setInterval(() => {
         debouncedSave();
-      }, 10000); // Auto-save every 10 seconds
+      }, 3000); // Auto-save every 3 seconds (reduced from 10)
 
       // Also save when window is about to close
       beforeUnloadHandler = () => {
@@ -645,6 +703,25 @@ export default function Spreadsheet({ }: SpreadsheetProps) {
       if (saveTimeout) clearTimeout(saveTimeout);
       if (beforeUnloadHandler && typeof window !== 'undefined') {
         window.removeEventListener('beforeunload', beforeUnloadHandler);
+      }
+      // Remove keyboard and blur event listeners
+      if (univerInstanceRef.current) {
+        const cellEditFinishHandler = (univerInstanceRef.current as any).cellEditFinishHandler;
+        const windowBlurHandler = (univerInstanceRef.current as any).windowBlurHandler;
+        if (cellEditFinishHandler) {
+          window.removeEventListener('keydown', cellEditFinishHandler);
+        }
+        if (windowBlurHandler) {
+          window.removeEventListener('blur', windowBlurHandler);
+        }
+      }
+      // Clean up command listener if it exists
+      if (univerInstanceRef.current && (univerInstanceRef.current as any).commandDispose) {
+        try {
+          (univerInstanceRef.current as any).commandDispose();
+        } catch (e) {
+          console.warn('Error disposing command listener:', e);
+        }
       }
       // Keyboard handler cleanup is in the separate useEffect above
       saveWorkbookData().catch(console.error); // Final save
