@@ -1149,28 +1149,62 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
             'HTTP-Referer': window.location.origin,
             'X-Title': 'SheetGrid',
           },
-          body: JSON.stringify({
-            model: selectedModel,
-            messages: [
-              systemMessage,
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              ...updatedMessages.filter((m: any) => m.role !== 'system').map((m: any) => {
-                // Add context to the latest user message for AI
+          body: (() => {
+            const requestBody = {
+              model: selectedModel,
+              messages: [
+                systemMessage,
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const userInput = conversationMessages.find((msg: any) => msg.role === 'user')?.content;
-                if (m.role === 'user' && userInput && m.content === userInput && depth === 0) {
-                  const context = getSheetContext();
-                  if (context) {
-                    return { role: 'user' as const, content: `${m.content}\n\n[Current Sheet Context]\n${context}` };
+                ...updatedMessages.filter((m: any) => m.role !== 'system').map((m: any) => {
+                  // Add context to the latest user message for AI
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const userInput = conversationMessages.find((msg: any) => msg.role === 'user')?.content;
+                  if (m.role === 'user' && userInput && m.content === userInput && depth === 0) {
+                    const context = getSheetContext();
+                    if (context) {
+                      return { role: 'user' as const, content: `${m.content}\n\n[Current Sheet Context]\n${context}` };
+                    }
                   }
-                }
-                return { role: m.role, content: m.content };
-              }),
-            ],
-            tools: getTools(),
-            tool_choice: 'auto',
-            max_tokens: 4096,
-          }),
+
+                  // For assistant messages with tool_calls, preserve the tool_calls field
+                  if (m.role === 'assistant' && m.tool_calls) {
+                    return {
+                      role: 'assistant' as const,
+                      tool_calls: m.tool_calls,
+                      ...(m.content ? { content: m.content } : {}), // Only include content if it exists
+                    };
+                  }
+
+                  // For tool messages, preserve the tool_call_id
+                  if (m.role === 'tool') {
+                    return {
+                      role: 'tool' as const,
+                      tool_call_id: m.tool_call_id,
+                      content: m.content,
+                    };
+                  }
+
+                  // For other messages (user, assistant without tool_calls), just return role and content
+                  return { role: m.role, content: m.content };
+                }),
+              ],
+              tools: getTools(),
+              tool_choice: 'auto',
+              max_tokens: 4096,
+            };
+
+            // Log request body for debugging (truncated to avoid console spam)
+            console.log(`[Depth ${depth}] API Request:`, {
+              model: requestBody.model,
+              messageCount: requestBody.messages.length,
+              toolCount: requestBody.tools.length,
+              lastMessageRole: requestBody.messages[requestBody.messages.length - 1]?.role,
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              lastMessageHasToolCalls: !!(requestBody.messages[requestBody.messages.length - 1] as any)?.tool_calls,
+            });
+
+            return JSON.stringify(requestBody);
+          })(),
           signal: abortSignal,
         },
         API_RETRY_ATTEMPTS
