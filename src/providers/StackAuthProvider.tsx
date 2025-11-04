@@ -18,7 +18,7 @@ export const stackClientApp = new StackClientApp({
 export function StackAuthProvider({ children }: { children: ReactNode }) {
   return (
     <StackProvider app={stackClientApp}>
-      <StackTheme theme="light">
+      <StackTheme>
         {children}
       </StackTheme>
     </StackProvider>

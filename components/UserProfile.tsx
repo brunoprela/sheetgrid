@@ -46,8 +46,16 @@ export default function ProfilePage() {
         body [style*="background-color:rgba(0"],
         body [style*="background: rgb(0"],
         body [style*="background:rgba(0"],
+        body [style*="background-color: rgb(0 0 0"],
+        body [style*="background: rgb(0 0 0"],
+        body [style*="background-color: rgb(20"],
+        body [style*="background-color:rgba(20"],
+        body [style*="background: rgb(20"],
+        body [style*="background:rgba(20"],
         body [style*="background-color:#000"],
         body [style*="background:#000"],
+        body [style*="background-color:#0000"],
+        body [style*="background:#0000"],
         body [style*="background-color:#0a0a0a"],
         body [style*="background:#0a0a0a"] {
           background-color: white !important;
@@ -59,8 +67,16 @@ export default function ProfilePage() {
         body [style*="background-color:rgba(0"] *,
         body [style*="background: rgb(0"] *,
         body [style*="background:rgba(0"] *,
+        body [style*="background-color: rgb(0 0 0"] *,
+        body [style*="background: rgb(0 0 0"] *,
+        body [style*="background-color: rgb(20"] *,
+        body [style*="background-color:rgba(20"] *,
+        body [style*="background: rgb(20"] *,
+        body [style*="background:rgba(20"] *,
         body [style*="background-color:#000"] *,
         body [style*="background:#000"] *,
+        body [style*="background-color:#0000"] *,
+        body [style*="background:#0000"] *,
         body [style*="background-color:#0a0a0a"] *,
         body [style*="background:#0a0a0a"] * {
           color: #000000 !important;
