@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SheetGrid - AI-Powered Excel Editor",
+  title: "SheetGrid",
   description: "Upload and edit Excel files with AI assistance",
 };
 
