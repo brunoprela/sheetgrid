@@ -390,6 +390,31 @@ export default function Spreadsheet({ }: SpreadsheetProps) {
         try {
           const createdWorkbook = univerAPI.createWorkbook(workbookData);
           console.log('✅ Workbook created from saved data:', createdWorkbook?.getId());
+
+          // Ensure all sheets have the correct row and column counts for infinite scrolling
+          // Use the FWorksheet API methods to set dimensions explicitly
+          const MIN_ROWS = 100000;
+          const MIN_COLS = 1000;
+          const sheets = createdWorkbook.getSheets();
+          for (const sheet of sheets) {
+            try {
+              const sheetSnapshot = sheet.getSheet().getSnapshot();
+              const sheetRowCount = (sheetSnapshot as any).rowCount || MIN_ROWS;
+              const sheetColCount = (sheetSnapshot as any).columnCount || MIN_COLS;
+
+              // Use FWorksheet API to set dimensions (for infinite scrolling support)
+              const finalRowCount = Math.max(sheetRowCount, MIN_ROWS);
+              const finalColCount = Math.max(sheetColCount, MIN_COLS);
+
+              sheet.setRowCount(finalRowCount);
+              sheet.setColumnCount(finalColCount);
+
+              console.log(`📏 Set sheet "${sheet.getSheetName()}" dimensions: ${finalRowCount} rows, ${finalColCount} columns`);
+            } catch (sheetError) {
+              console.warn(`⚠️ Could not set dimensions for sheet:`, sheetError);
+            }
+          }
+
           // Mark loading as complete - safe to save now
           isLoadingDataRef.current = false;
         } catch (error) {
@@ -687,6 +712,30 @@ export default function Spreadsheet({ }: SpreadsheetProps) {
         try {
           const createdWorkbook = univerAPI.createWorkbook(workbookData);
           console.log('✅ Workbook imported from XLSX:', createdWorkbook?.getId());
+
+          // Ensure all sheets have the correct row and column counts for infinite scrolling
+          // Use the FWorksheet API methods to set dimensions explicitly
+          const MIN_ROWS = 100000;
+          const MIN_COLS = 1000;
+          const sheets = createdWorkbook.getSheets();
+          for (const sheet of sheets) {
+            try {
+              const sheetSnapshot = sheet.getSheet().getSnapshot();
+              const sheetRowCount = (sheetSnapshot as any).rowCount || MIN_ROWS;
+              const sheetColCount = (sheetSnapshot as any).columnCount || MIN_COLS;
+
+              // Use FWorksheet API to set dimensions (for infinite scrolling support)
+              const finalRowCount = Math.max(sheetRowCount, MIN_ROWS);
+              const finalColCount = Math.max(sheetColCount, MIN_COLS);
+
+              sheet.setRowCount(finalRowCount);
+              sheet.setColumnCount(finalColCount);
+
+              console.log(`📏 Set imported sheet "${sheet.getSheetName()}" dimensions: ${finalRowCount} rows, ${finalColCount} columns`);
+            } catch (sheetError) {
+              console.warn(`⚠️ Could not set dimensions for imported sheet:`, sheetError);
+            }
+          }
 
           // Save imported data to IndexedDB
           await saveWorkbookDataToIndexedDB(workbookData);

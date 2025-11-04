@@ -24,15 +24,15 @@ export async function exportWorkbookToXLSX(workbookData: IWorkbookData, filename
 
       // Get cell matrix data
       const cellMatrix = sheet.cellData || {};
-      
+
       // Find the maximum row and column
       let maxRow = 0;
       let maxCol = 0;
-      
+
       for (const rowKey in cellMatrix) {
         const row = parseInt(rowKey);
         if (row > maxRow) maxRow = row;
-        
+
         const rowData = cellMatrix[rowKey];
         if (rowData) {
           for (const colKey in rowData) {
@@ -44,7 +44,7 @@ export async function exportWorkbookToXLSX(workbookData: IWorkbookData, filename
 
       // Create a 2D array for the sheet data
       const sheetData: any[][] = [];
-      
+
       // Initialize all rows
       for (let r = 0; r <= maxRow; r++) {
         sheetData[r] = [];
@@ -57,23 +57,23 @@ export async function exportWorkbookToXLSX(workbookData: IWorkbookData, filename
       for (const rowKey in cellMatrix) {
         const row = parseInt(rowKey);
         const rowData = cellMatrix[rowKey];
-        
+
         if (rowData) {
           for (const colKey in rowData) {
             const col = parseInt(colKey);
             const cell = rowData[colKey];
-            
+
             if (cell) {
               // Get the value from the cell
               // Cell structure: { v: value, t: type, s: style, ... }
               let value: any = '';
-              
+
               if (cell.v !== undefined && cell.v !== null) {
                 // Get the raw value - XLSX cells can have various types
                 // Use type assertion to work around TypeScript's strict type checking
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const rawValue: any = cell.v;
-                
+
                 // Check cell type first, then handle value accordingly
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 if ((cell as any).t === 'n') {
@@ -98,7 +98,7 @@ export async function exportWorkbookToXLSX(workbookData: IWorkbookData, filename
                   value = String(rawValue);
                 }
               }
-              
+
               sheetData[row][col] = value;
             }
           }
@@ -183,9 +183,9 @@ export async function importXLSXToWorkbookData(file: File): Promise<IWorkbookDat
         // Read the XLSX workbook
         // XLSX.read() reads all cells by default, regardless of !ref range
         // The !ref property is just a convenience hint, but all cells are available in the ws object
-        const wb = XLSX.read(data, { 
-          type: 'binary', 
-          cellFormula: true, 
+        const wb = XLSX.read(data, {
+          type: 'binary',
+          cellFormula: true,
           cellDates: true,
         });
 
@@ -207,7 +207,7 @@ export async function importXLSXToWorkbookData(file: File): Promise<IWorkbookDat
 
           // Create cell matrix for Univer
           const cellMatrix: { [row: string]: { [col: string]: any } } = {};
-          
+
           // Track maximum row and column to determine sheet dimensions
           let maxRow = -1;
           let maxCol = -1;
@@ -217,13 +217,13 @@ export async function importXLSXToWorkbookData(file: File): Promise<IWorkbookDat
           // Cell addresses are keys like "A1", "B2", etc.
           const cellAddressPattern = /^[A-Z]+[0-9]+$/;
           let cellCount = 0;
-          
+
           for (const cellAddress in ws) {
             // Skip special properties that start with !
             if (cellAddress.startsWith('!')) {
               continue;
             }
-            
+
             // Only process valid cell addresses
             if (!cellAddressPattern.test(cellAddress)) {
               continue;
@@ -238,7 +238,7 @@ export async function importXLSXToWorkbookData(file: File): Promise<IWorkbookDat
             const decoded = XLSX.utils.decode_cell(cellAddress);
             const R = decoded.r;
             const C = decoded.c;
-            
+
             // Update max row and column (this ensures we capture all cells with data)
             if (R > maxRow) maxRow = R;
             if (C > maxCol) maxCol = C;
@@ -253,7 +253,7 @@ export async function importXLSXToWorkbookData(file: File): Promise<IWorkbookDat
 
             // Create cell data object
             const cellData: any = {};
-            
+
             // Set value
             if (cell.v !== undefined) {
               cellData.v = cell.v;
@@ -261,7 +261,7 @@ export async function importXLSXToWorkbookData(file: File): Promise<IWorkbookDat
               // Use formatted text if value is not available
               cellData.v = cell.w;
             }
-            
+
             // Set type
             if (cell.t) {
               cellData.t = cell.t; // 'n' for number, 's' for string, 'b' for boolean, 'e' for error
@@ -272,7 +272,7 @@ export async function importXLSXToWorkbookData(file: File): Promise<IWorkbookDat
             } else {
               cellData.t = 's';
             }
-            
+
             // Set formula if present
             if (cell.f) {
               cellData.f = cell.f;
@@ -287,7 +287,7 @@ export async function importXLSXToWorkbookData(file: File): Promise<IWorkbookDat
 
           // Get the range from !ref for comparison/debugging (but don't rely on it)
           const rangeFromRef: XLSX.Range | null = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : null;
-          
+
           // If maxRow from actual cells is higher than !ref range, we found cells beyond !ref
           if (rangeFromRef && maxRow > rangeFromRef.e.r) {
             console.log(`⚠️ Found ${maxRow - rangeFromRef.e.r} additional rows beyond !ref range (${rangeFromRef.e.r + 1} to ${maxRow})`);
@@ -308,13 +308,28 @@ export async function importXLSXToWorkbookData(file: File): Promise<IWorkbookDat
           });
 
           // Create sheet data
-          // Set rowCount and columnCount to at least 100,000 rows and 1,000 columns
-          // This ensures users can scroll to these limits. Univer's virtual scrolling will handle rendering efficiently.
-          const MIN_ROWS = 100000;
-          const MIN_COLS = 1000;
-          const calculatedRowCount = Math.max(maxRow + 1, MIN_ROWS);
-          const calculatedColCount = Math.max(maxCol + 1, MIN_COLS);
-          
+          // For infinite scrolling, we can either:
+          // 1. Not set rowCount/columnCount (let Univer determine dynamically based on data)
+          // 2. Set very high values to ensure scrolling capability
+          // We'll use a high value (Excel's maximum is 1,048,576 rows and 16,384 columns)
+          // This allows users to scroll and add data anywhere in this range
+          const EXCEL_MAX_ROWS = 1048576; // Excel 2007+ maximum rows
+          const EXCEL_MAX_COLS = 16384;   // Excel 2007+ maximum columns (XFD column)
+          const MIN_ROWS = 100000;         // Minimum we want to support
+          const MIN_COLS = 1000;           // Minimum we want to support
+
+          // Ensure at least MIN_ROWS/MIN_COLS, but don't exceed Excel's maximum
+          // Use Math.min(Math.max(...)) to clamp between minimum and maximum
+          const calculatedRowCount = Math.min(Math.max(maxRow + 1, MIN_ROWS), EXCEL_MAX_ROWS);
+          const calculatedColCount = Math.min(Math.max(maxCol + 1, MIN_COLS), EXCEL_MAX_COLS);
+
+          console.log(`📏 Sheet "${sheetName}" dimensions:`, {
+            actualMaxRow: maxRow,
+            actualMaxCol: maxCol,
+            setRowCount: calculatedRowCount,
+            setColCount: calculatedColCount,
+          });
+
           const sheetId = `sheet-${Date.now()}-${wb.SheetNames.indexOf(sheetName)}`;
           workbookData.sheets[sheetId] = {
             id: sheetId,
