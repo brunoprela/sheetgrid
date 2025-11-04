@@ -174,18 +174,22 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
   // Save messages to IndexedDB whenever they change (debounced)
   useEffect(() => {
     if (isLoadingHistory) return; // Don't save while loading
+    if (messages.length === 0) return; // Don't save if no messages (except system message)
 
+    // Use a longer debounce to ensure all messages from tool calls are captured
     const saveTimeout = setTimeout(async () => {
       try {
         // Filter out system message before saving
         const messagesToSave = messages.filter(msg => msg.role !== 'system');
         if (messagesToSave.length > 0) {
+          console.log(`💾 Saving ${messagesToSave.length} messages to IndexedDB for chat ${chatId}`);
           await saveAllChatMessages(chatId, messagesToSave);
+          console.log(`✅ Successfully saved ${messagesToSave.length} messages`);
         }
       } catch (error) {
-        console.error('Error saving chat history:', error);
+        console.error('❌ Error saving chat history:', error);
       }
-    }, 1000); // Debounce saves by 1 second
+    }, 2000); // Increased debounce to 2 seconds to capture all messages from recursive tool calls
 
     return () => clearTimeout(saveTimeout);
   }, [messages, isLoadingHistory, chatId]);
@@ -1234,13 +1238,15 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
 
       // No more tool calls, return final response
       const finalResponse = data.choices?.[0]?.message?.content || 'Operations completed successfully.';
+      const finalAssistantMessage = {
+        role: 'assistant' as const,
+        content: finalResponse,
+        timestamp: new Date(), // Add timestamp for proper saving
+      };
       return {
         messages: [
           ...updatedMessages,
-          {
-            role: 'assistant' as const,
-            content: finalResponse,
-          },
+          finalAssistantMessage,
         ],
         finalResponse,
       };
@@ -1379,14 +1385,29 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
           setMessages((prev) => {
             // Remove the temporary "Executing operations..." message
             const withoutTemp = prev.filter((msg, idx) => !(idx === prev.length - 1 && msg.content === 'Executing operations...'));
-            // Add all messages from the recursive function (except system message and original messages)
+            
+            // Get the last message timestamp from existing messages to maintain order
+            const lastTimestamp = withoutTemp.length > 0 
+              ? withoutTemp[withoutTemp.length - 1].timestamp.getTime()
+              : Date.now();
+            
+            // Add all messages from the recursive function
+            // We only save assistant messages (tool messages are intermediate and don't need to be persisted)
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const newMessages = finalMessages.filter((msg: any) => {
-              // Skip system messages and messages we already have
-              if (msg.role === 'system') return false;
-              // Include assistant messages with tool_calls, tool responses, and final assistant message
-              return msg.role === 'assistant' || msg.role === 'tool';
-            });
+            const newMessages = finalMessages
+              .filter((msg: any) => {
+                // Only include assistant messages (skip system, tool, and user messages - we already have user messages)
+                return msg.role === 'assistant';
+              })
+              // Map to our Message interface, ensuring timestamps and content are set
+              .map((msg: any, index: number) => ({
+                role: 'assistant' as const,
+                // For assistant messages with tool_calls but no content, use a placeholder
+                // The final assistant message should have content
+                content: msg.content || (msg.tool_calls ? 'Executing operations...' : ''),
+                timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(lastTimestamp + (index + 1) * 1000), // Space them 1 second apart
+              })) as Message[];
+            
             return [...withoutTemp, ...newMessages];
           });
 

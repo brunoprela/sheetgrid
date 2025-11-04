@@ -249,8 +249,9 @@ export default function Spreadsheet({ }: SpreadsheetProps) {
         }),
         UniverSheetsAdvancedPreset({
           useWorker: false,
-          // Removed universerEndpoint - we use client-side import/export instead
-          // Setting this would try to connect to a server that doesn't exist, causing 405 errors
+          // Try using Univer's cloud server for import/export (similar to MCP)
+          // If this doesn't work, we'll fall back to client-side import/export
+          universerEndpoint: 'https://universer.univer.ai',
         }),
         UniverSheetsThreadCommentPreset({
           collaboration,
