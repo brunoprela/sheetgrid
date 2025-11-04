@@ -83,6 +83,7 @@ export default function Spreadsheet({ }: SpreadsheetProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const univerInstanceRef = useRef<{ univerAPI: any; univer: any } | null>(null);
   const keyDownHandlerRef = useRef<((e: KeyboardEvent) => void) | null>(null);
+  const isLoadingDataRef = useRef<boolean>(true); // Track if data is still loading
   const { univerMcpKey } = useUserApiKeys();
 
   // Register global keyboard handler early, before Univer initializes
@@ -283,6 +284,12 @@ export default function Spreadsheet({ }: SpreadsheetProps) {
 
     // Function to save workbook data to IndexedDB
     const saveWorkbookData = async () => {
+      // Don't save while data is still loading to prevent overwriting saved data with empty workbook
+      if (isLoadingDataRef.current) {
+        console.log('⏳ Skipping save - data is still loading');
+        return;
+      }
+
       try {
         const workbook = univerAPI.getActiveWorkbook();
         if (!workbook) {
@@ -374,6 +381,8 @@ export default function Spreadsheet({ }: SpreadsheetProps) {
         if (!savedData) {
           console.log('No saved data found, creating empty workbook');
           univer.createUnit(UniverInstanceType.UNIVER_SHEET, {});
+          // Mark loading as complete immediately since there's nothing to load
+          isLoadingDataRef.current = false;
           return;
         }
 
@@ -383,6 +392,8 @@ export default function Spreadsheet({ }: SpreadsheetProps) {
         if (sheetNames.length === 0) {
           console.log('Empty saved data, creating empty workbook');
           univer.createUnit(UniverInstanceType.UNIVER_SHEET, {});
+          // Mark loading as complete immediately since there's nothing to load
+          isLoadingDataRef.current = false;
           return;
         }
 
@@ -415,6 +426,8 @@ export default function Spreadsheet({ }: SpreadsheetProps) {
                     tryLoadData();
                   } else {
                     console.error('Failed to load workbook after extended retry');
+                    // Mark loading as complete even if we can't load to prevent blocking saves forever
+                    isLoadingDataRef.current = false;
                   }
                 }, 1000);
                 return;
@@ -493,8 +506,12 @@ export default function Spreadsheet({ }: SpreadsheetProps) {
             });
 
             console.log('✅ Workbook data loaded successfully from IndexedDB');
+            // Mark loading as complete - safe to save now
+            isLoadingDataRef.current = false;
           } catch (error) {
             console.error('❌ Error loading workbook data:', error);
+            // Mark loading as complete even on error so we don't block saves forever
+            isLoadingDataRef.current = false;
           }
         };
 
@@ -506,6 +523,8 @@ export default function Spreadsheet({ }: SpreadsheetProps) {
         console.error('Error loading workbook from IndexedDB:', error);
         // Create empty workbook as fallback
         univer.createUnit(UniverInstanceType.UNIVER_SHEET, {});
+        // Mark loading as complete even on error so we don't block saves forever
+        isLoadingDataRef.current = false;
       }
     };
 
