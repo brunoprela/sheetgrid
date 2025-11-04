@@ -352,9 +352,11 @@ export default function Spreadsheet({}: SpreadsheetProps) {
         // Save to IndexedDB
         if (typeof window !== 'undefined') {
           await saveWorkbookDataToIndexedDB(workbookData);
-          console.log('Workbook data saved to IndexedDB:', {
+          console.log('✅ Workbook data saved to IndexedDB:', {
             sheetCount: Object.keys(workbookData).length,
-            totalRows: Object.values(workbookData).reduce((sum, sheet) => sum + sheet.data.length, 0),
+            sheetNames: Object.keys(workbookData),
+            totalRows: Object.values(workbookData).reduce((sum, sheet) => sum + (sheet.data?.length || 0), 0),
+            timestamp: new Date().toISOString(),
           });
         }
       } catch (error) {
@@ -394,18 +396,28 @@ export default function Spreadsheet({}: SpreadsheetProps) {
         
         // Wait for workbook to be ready with retries
         let retries = 0;
-        const maxRetries = 10;
+        const maxRetries = 50; // Increased retries for slower systems
         const tryLoadData = () => {
           try {
             const workbook = univerAPI.getActiveWorkbook();
             if (!workbook) {
               retries++;
               if (retries < maxRetries) {
-                setTimeout(tryLoadData, 200);
+                setTimeout(tryLoadData, 100); // Faster retry interval
+                return;
               } else {
-                console.warn('Workbook not ready after max retries');
+                console.error('Workbook not ready after max retries. Retrying load...');
+                // Try one more time after a longer delay
+                setTimeout(() => {
+                  const workbook = univerAPI.getActiveWorkbook();
+                  if (workbook) {
+                    tryLoadData();
+                  } else {
+                    console.error('Failed to load workbook after extended retry');
+                  }
+                }, 1000);
+                return;
               }
-              return;
             }
 
             // Load first sheet
@@ -479,14 +491,15 @@ export default function Spreadsheet({}: SpreadsheetProps) {
               }
             });
 
-            console.log('Workbook data loaded successfully from IndexedDB');
+            console.log('✅ Workbook data loaded successfully from IndexedDB');
           } catch (error) {
-            console.error('Error loading workbook data:', error);
+            console.error('❌ Error loading workbook data:', error);
           }
         };
 
-        // Start loading after a short delay
-        setTimeout(tryLoadData, 300);
+        // Start loading after a delay to ensure workbook is ready
+        // Increased delay to give Univer time to fully initialize
+        setTimeout(tryLoadData, 500);
 
       } catch (error) {
         console.error('Error loading workbook from IndexedDB:', error);
