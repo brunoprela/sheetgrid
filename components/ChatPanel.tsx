@@ -127,7 +127,11 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
   const API_RETRY_ATTEMPTS = 3; // Retry API calls on failure
 
   // Function to clean context from message content
-  const cleanMessageContent = (content: string): string => {
+  const cleanMessageContent = (content: string | undefined | null): string => {
+    // Handle undefined/null content (e.g., assistant messages with tool_calls might not have content)
+    if (!content) {
+      return '';
+    }
     // Remove [Current Sheet Context] block if it exists
     const contextPattern = /\n\n\[Current Sheet Context\][\s\S]*$/;
     return content.replace(contextPattern, '').trim();
@@ -1618,9 +1622,13 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
                       ? 'bg-[#0066CC] text-white'
                       : 'bg-white text-[#333333] border border-[#E0E0E0]'
                       }`}>
-                      <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">
-                        {cleanMessageContent(message.content)}
-                      </p>
+                      {cleanMessageContent(message.content) ? (
+                        <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+                          {cleanMessageContent(message.content)}
+                        </p>
+                      ) : message.role === 'assistant' ? (
+                        <p className="text-sm text-[#999999] italic">Executing operations...</p>
+                      ) : null}
                     </div>
                   </div>
                 </div>
