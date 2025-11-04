@@ -123,6 +123,8 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
 
   // Configuration constants
   const MAX_TOOLS_PER_ROUND = 15;
+  const MAX_TOOL_CALL_DEPTH = 10; // Maximum recursive depth for tool calling (state-of-the-art unlimited depth support)
+  const API_RETRY_ATTEMPTS = 3; // Retry API calls on failure
 
   // Function to clean context from message content
   const cleanMessageContent = (content: string): string => {
@@ -579,12 +581,45 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
         data = await response.json();
       }
 
-      // MCP tools/call returns { result: { content: [...] } }
+      // MCP tools/call returns { result: { content: [...] } } or { error: {...} }
+      // Check for errors in the response
+      if (data.error) {
+        const errorMsg = data.error.message || JSON.stringify(data.error);
+        // Retry logic for tool-level errors
+        if (retries > 0) {
+          console.warn(`Tool "${name}" returned an error, retrying... (${retries} attempts left)`, errorMsg);
+          await new Promise(resolve => setTimeout(resolve, 1000 * (3 - retries))); // 1s, 2s delays
+          return executeTool(toolCall, retries - 1);
+        }
+        console.error(`Tool "${name}" failed after all retries:`, errorMsg);
+        return JSON.stringify({ error: `MCP tool execution failed: ${errorMsg}` });
+      }
+
       if (data.result && data.result.content) {
         const content = data.result.content;
         // Content is an array, extract text
         if (Array.isArray(content) && content.length > 0) {
-          return content[0].text || JSON.stringify(content[0]);
+          const resultText = content[0].text || JSON.stringify(content[0]);
+          // Check if the result text contains an error
+          try {
+            const parsedResult = JSON.parse(resultText);
+            if (parsedResult.error) {
+              // Tool returned an error in the result - retry if we have retries left
+              if (retries > 0) {
+                console.warn(`Tool "${name}" result contains an error, retrying... (${retries} attempts left)`, parsedResult.error);
+                await new Promise(resolve => setTimeout(resolve, 1000 * (3 - retries))); // 1s, 2s delays
+                return executeTool(toolCall, retries - 1);
+              }
+            }
+          } catch {
+            // Not JSON or parse failed, check if it's a plain error string
+            if (resultText.toLowerCase().includes('error') && retries > 0) {
+              console.warn(`Tool "${name}" result may contain an error, retrying... (${retries} attempts left)`, resultText.substring(0, 100));
+              await new Promise(resolve => setTimeout(resolve, 1000 * (3 - retries)));
+              return executeTool(toolCall, retries - 1);
+            }
+          }
+          return resultText;
         }
         return JSON.stringify(content);
       }
@@ -898,6 +933,221 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
     fileInputRef.current?.click();
   };
 
+  // Helper function to retry API calls with exponential backoff (state-of-the-art)
+  const fetchWithRetry = async (
+    url: string,
+    options: RequestInit,
+    retries: number
+  ): Promise<Response> => {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        const response = await fetch(url, options);
+        if (response.ok) {
+          return response;
+        }
+
+        // Don't retry on client errors (4xx), only retry on server errors (5xx) and network errors
+        if (response.status >= 400 && response.status < 500 && response.status !== 408) {
+          // Don't retry on 408 (Request Timeout) as it might be recoverable
+          throw new Error(`Client error: ${response.status} ${response.statusText}`);
+        }
+
+        lastError = new Error(`Server error: ${response.status} ${response.statusText}`);
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        if (attempt < retries - 1) {
+          // Exponential backoff: 1s, 2s, 4s
+          const delay = Math.pow(2, attempt) * 1000;
+          console.warn(`API call failed, retrying in ${delay}ms... (attempt ${attempt + 1}/${retries})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+
+    throw lastError || new Error('API call failed after all retries');
+  };
+
+  // Recursive function to handle tool calls with unlimited depth (state-of-the-art like Cursor)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleToolCallsRecursive = async (
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    toolCalls: any[],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    conversationMessages: any[],
+    depth: number = 0,
+    abortSignal: AbortSignal,
+    onProgress?: (depth: number, toolCount: number) => void
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ): Promise<{ messages: any[]; finalResponse: string }> => {
+    // Safety check to prevent infinite loops
+    if (depth >= MAX_TOOL_CALL_DEPTH) {
+      console.warn(`Maximum tool call depth (${MAX_TOOL_CALL_DEPTH}) reached`);
+      return {
+        messages: conversationMessages,
+        finalResponse: 'Maximum tool call depth reached. Please try breaking down your request into smaller steps.',
+      };
+    }
+
+    // Limit tool calls per round for performance
+    const toolCallsToExecute = toolCalls.slice(0, MAX_TOOLS_PER_ROUND);
+    if (toolCalls.length > MAX_TOOLS_PER_ROUND) {
+      console.warn(`Too many tool calls (${toolCalls.length}), limiting to ${MAX_TOOLS_PER_ROUND}`);
+    }
+
+    // Notify progress if callback provided
+    if (onProgress) {
+      onProgress(depth, toolCallsToExecute.length);
+    }
+
+    // Execute all tool calls - use Promise.allSettled for better error handling
+    const toolResults: Array<{ name: string; result: string; tool_call_id: string }> = [];
+
+    const toolPromises = toolCallsToExecute.map(async (toolCall) => {
+      if (abortSignal.aborted) {
+        return null;
+      }
+
+      console.log(`[Depth ${depth}] Executing tool: ${toolCall.function.name}`);
+      let parsedArgs = {};
+      if (toolCall.function.arguments) {
+        try {
+          parsedArgs = JSON.parse(toolCall.function.arguments);
+          // Handle double-encoded JSON
+          if (typeof parsedArgs === 'string') {
+            parsedArgs = JSON.parse(parsedArgs);
+          }
+        } catch (e) {
+          console.error('Failed to parse tool arguments:', e, toolCall.function.arguments);
+          parsedArgs = {};
+        }
+      }
+
+      try {
+        const result = await executeTool({
+          name: toolCall.function.name,
+          arguments: parsedArgs,
+        });
+        return {
+          name: toolCall.function.name,
+          result,
+          tool_call_id: toolCall.id,
+        };
+      } catch (error) {
+        console.error(`Tool ${toolCall.function.name} failed:`, error);
+        return {
+          name: toolCall.function.name,
+          result: JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
+          tool_call_id: toolCall.id,
+        };
+      }
+    });
+
+    const settledResults = await Promise.allSettled(toolPromises);
+    settledResults.forEach((result, index) => {
+      if (result.status === 'fulfilled' && result.value) {
+        toolResults.push(result.value);
+      } else if (result.status === 'rejected') {
+        // Handle failed tool execution
+        const toolCall = toolCallsToExecute[index];
+        toolResults.push({
+          name: toolCall.function.name,
+          result: JSON.stringify({ error: result.reason?.message || 'Tool execution failed' }),
+          tool_call_id: toolCall.id,
+        });
+      }
+    });
+
+    // Prepare tool responses for the API - use Map for O(1) lookup instead of find()
+    const toolCallMap = new Map(toolCallsToExecute.map(tc => [tc.id, tc]));
+    const toolResponses = toolResults.map((tr) => ({
+      role: 'tool' as const,
+      tool_call_id: tr.tool_call_id,
+      content: tr.result,
+    }));
+
+    // Add assistant message with tool calls and tool responses to conversation
+    const updatedMessages = [
+      ...conversationMessages,
+      {
+        role: 'assistant' as const,
+        tool_calls: toolCallsToExecute,
+      },
+      ...toolResponses,
+    ];
+
+    // Make API call to get next response with retry logic
+    try {
+      const response = await fetchWithRetry(
+        'https://openrouter.ai/api/v1/chat/completions',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${openRouterKey}`,
+            'HTTP-Referer': window.location.origin,
+            'X-Title': 'SheetGrid',
+          },
+          body: JSON.stringify({
+            model: selectedModel,
+            messages: [
+              systemMessage,
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              ...updatedMessages.filter((m: any) => m.role !== 'system').map((m: any) => {
+                // Add context to the latest user message for AI
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const userInput = conversationMessages.find((msg: any) => msg.role === 'user')?.content;
+                if (m.role === 'user' && userInput && m.content === userInput && depth === 0) {
+                  const context = getSheetContext();
+                  if (context) {
+                    return { role: 'user' as const, content: `${m.content}\n\n[Current Sheet Context]\n${context}` };
+                  }
+                }
+                return { role: m.role, content: m.content };
+              }),
+            ],
+            tools: getTools(),
+            tool_choice: 'auto',
+            max_tokens: 4096,
+          }),
+          signal: abortSignal,
+        },
+        API_RETRY_ATTEMPTS
+      );
+
+      const data = await response.json();
+
+      // Check if there are more tool calls (recursive case)
+      if (data.choices?.[0]?.message?.tool_calls && data.choices[0].message.tool_calls.length > 0) {
+        console.log(`[Depth ${depth}] More tool calls detected (${data.choices[0].message.tool_calls.length}), recursing...`);
+        return handleToolCallsRecursive(
+          data.choices[0].message.tool_calls,
+          updatedMessages,
+          depth + 1,
+          abortSignal,
+          onProgress
+        );
+      }
+
+      // No more tool calls, return final response
+      const finalResponse = data.choices?.[0]?.message?.content || 'Operations completed successfully.';
+      return {
+        messages: [
+          ...updatedMessages,
+          {
+            role: 'assistant' as const,
+            content: finalResponse,
+          },
+        ],
+        finalResponse,
+      };
+    } catch (error) {
+      console.error(`API call failed at depth ${depth}:`, error);
+      throw error;
+    }
+  };
+
   const sendMessage = async () => {
     if (!input.trim() || isLoading) return;
 
@@ -998,7 +1248,7 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
 
       const data = await response.json();
 
-      // Handle tool calls
+      // Handle tool calls with recursive depth support (state-of-the-art)
       console.log('AI response:', data.choices?.[0]?.message);
       if (data.choices?.[0]?.message?.tool_calls && data.choices[0].message.tool_calls.length > 0) {
         console.log('Tool calls:', data.choices[0].message.tool_calls);
@@ -1009,236 +1259,35 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
         };
         setMessages((prev) => [...prev, assistantMessage]);
 
-        // Execute all tool calls with limit
-        const toolCallsToExecute = data.choices[0].message.tool_calls.slice(0, MAX_TOOLS_PER_ROUND);
-
-        if (data.choices[0].message.tool_calls.length > MAX_TOOLS_PER_ROUND) {
-          console.warn(`Too many tool calls (${data.choices[0].message.tool_calls.length}), limiting to ${MAX_TOOLS_PER_ROUND}`);
-        }
-
-        const toolResults: Array<{ name: string; result: string }> = [];
-        for (let i = 0; i < toolCallsToExecute.length; i++) {
-          const toolCall = toolCallsToExecute[i];
-          // Check if request was aborted
-          if (abortController.signal.aborted) {
-            console.log('Request aborted, stopping tool execution');
-            return;
-          }
-          console.log(`Executing tool ${i + 1}/${toolCallsToExecute.length}: ${toolCall.function.name}`);
-          let parsedArgs = {};
-          if (toolCall.function.arguments) {
-            try {
-              parsedArgs = JSON.parse(toolCall.function.arguments);
-              // Handle double-encoded JSON (sometimes OpenAI returns string-encoded JSON)
-              if (typeof parsedArgs === 'string') {
-                parsedArgs = JSON.parse(parsedArgs);
-              }
-            } catch (e) {
-              console.error('Failed to parse tool arguments:', e, toolCall.function.arguments);
-              parsedArgs = {};
+        // Use recursive function for unlimited tool call depth (state-of-the-art)
+        try {
+          const { messages: finalMessages, finalResponse } = await handleToolCallsRecursive(
+            data.choices[0].message.tool_calls,
+            updatedMessages,
+            0, // Start at depth 0
+            abortController.signal,
+            (depth, toolCount) => {
+              // Progress callback - could update UI here if needed
+              console.log(`[Progress] Depth: ${depth}, Tools: ${toolCount}`);
             }
-          }
-          const result = await executeTool({
-            name: toolCall.function.name,
-            arguments: parsedArgs,
-          });
-          console.log(`Tool ${i + 1}/${toolCallsToExecute.length} complete: ${toolCall.function.name}`);
-          toolResults.push({ name: toolCall.function.name, result });
-        }
+          );
 
-        // Prepare tool responses for OpenRouter
-        const toolResponses = toolResults.map((tr) => ({
-          role: 'tool' as const,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          tool_call_id: data.choices[0].message.tool_calls.find((tc: any) => tc.function.name === tr.name).id,
-          content: tr.result,
-        }));
-
-        // Check if request was aborted before sending follow-up
-        if (abortController.signal.aborted) {
-          console.log('Request aborted, skipping follow-up request');
-          return;
-        }
-
-        // Send the results back to OpenRouter for a final response
-        if (!openRouterKey) {
-          throw new Error('OpenRouter API key is not configured. Please add your OpenRouter API key in your profile settings.');
-        }
-
-        const followUpResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          signal: abortController.signal,
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${openRouterKey}`,
-            'HTTP-Referer': window.location.origin,
-            'X-Title': 'SheetGrid',
-          },
-          body: JSON.stringify({
-            model: selectedModel,
-            messages: [
-              systemMessage,
-              ...updatedMessages.filter(m => m.role !== 'system').map((m) => {
-                // Add context to the latest user message for AI
-                if (m.role === 'user' && m.content === input.trim() && context) {
-                  return { role: 'user' as const, content: `${m.content}\n\n[Current Sheet Context]\n${context}` };
-                }
-                return { role: m.role, content: m.content };
-              }),
-              { role: 'assistant', tool_calls: data.choices[0].message.tool_calls },
-              ...toolResponses,
-            ],
-            tools: getTools(),
-            tool_choice: 'auto',
-            max_tokens: 4096,
-          }),
-        });
-
-        if (!followUpResponse.ok) {
-          let errorMessage = `HTTP ${followUpResponse.status}: ${followUpResponse.statusText}`;
-          try {
-            const errorData = await followUpResponse.json();
-            errorMessage = errorData.error?.message || errorData.message || errorMessage;
-            console.error('OpenRouter Follow-up API Error:', {
-              status: followUpResponse.status,
-              statusText: followUpResponse.statusText,
-              error: errorData,
-            });
-          } catch {
-            const text = await followUpResponse.text();
-            console.error('OpenRouter Follow-up API Error (non-JSON):', {
-              status: followUpResponse.status,
-              statusText: followUpResponse.statusText,
-              body: text.substring(0, 500),
-            });
-          }
-
-          if (followUpResponse.status === 401) {
-            throw new Error(`OpenRouter authentication failed. Please check your API key in .env file. Error: ${errorMessage}`);
-          }
-          throw new Error(`Failed to get follow-up response from OpenRouter: ${errorMessage}`);
-        }
-
-        const followUpData = await followUpResponse.json();
-        console.log('Follow-up response complete:', followUpData);
-        console.log('Follow-up AI response:', followUpData.choices?.[0]?.message);
-        console.log('Follow-up tool_calls:', followUpData.choices?.[0]?.message?.tool_calls);
-        console.log('Follow-up tool_calls length:', followUpData.choices?.[0]?.message?.tool_calls?.length);
-
-        // Check if follow-up has tool calls (multi-step tool execution)
-        if (followUpData.choices?.[0]?.message?.tool_calls && followUpData.choices[0].message.tool_calls.length > 0) {
-          console.log('Follow-up tool calls:', JSON.stringify(followUpData.choices[0].message.tool_calls, null, 2));
-          const followUpToolResults: Array<{ name: string; result: string }> = [];
-          const followUpToolCalls = followUpData.choices[0].message.tool_calls.slice(0, MAX_TOOLS_PER_ROUND);
-
-          for (let i = 0; i < followUpToolCalls.length; i++) {
-            const toolCall = followUpToolCalls[i];
-            // Check if request was aborted
-            if (abortController.signal.aborted) {
-              console.log('Request aborted, stopping follow-up tool execution');
-              return;
-            }
-            console.log(`Executing follow-up tool ${i + 1}/${followUpToolCalls.length}: ${toolCall.function.name}`);
-            let parsedArgs = {};
-            if (toolCall.function.arguments) {
-              try {
-                parsedArgs = JSON.parse(toolCall.function.arguments);
-                // Handle double-encoded JSON
-                if (typeof parsedArgs === 'string') {
-                  parsedArgs = JSON.parse(parsedArgs);
-                }
-              } catch (e) {
-                console.error('Failed to parse follow-up tool arguments:', e, toolCall.function.arguments);
-                parsedArgs = {};
-              }
-            }
-            const result = await executeTool({
-              name: toolCall.function.name,
-              arguments: parsedArgs,
-            });
-            console.log(`Follow-up tool ${i + 1}/${followUpToolCalls.length} complete: ${toolCall.function.name}`);
-            followUpToolResults.push({ name: toolCall.function.name, result });
-          }
-
-          // Send another follow-up if needed (multi-round tool calling)
-          const followUpToolResponses = followUpToolResults.map((tr) => ({
-            role: 'tool' as const,
+          // Update messages with all the conversation including tool calls and final response
+          // Remove the "Executing operations..." message and add the actual conversation
+          setMessages((prev) => {
+            // Remove the temporary "Executing operations..." message
+            const withoutTemp = prev.filter((msg, idx) => !(idx === prev.length - 1 && msg.content === 'Executing operations...'));
+            // Add all messages from the recursive function (except system message and original messages)
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            tool_call_id: followUpData.choices[0].message.tool_calls.find((tc: any) => tc.function.name === tr.name).id,
-            content: tr.result,
-          }));
-
-          // Check if request was aborted before sending final follow-up
-          if (abortController.signal.aborted) {
-            console.log('Request aborted, skipping final follow-up request');
-            return;
-          }
-
-          const finalFollowUpResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-            signal: abortController.signal,
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${openRouterKey}`,
-              'HTTP-Referer': window.location.origin,
-              'X-Title': 'SheetGrid',
-            },
-            body: JSON.stringify({
-              model: selectedModel,
-              messages: [
-                systemMessage,
-                ...updatedMessages.filter(m => m.role !== 'system').map((m) => {
-                  // Add context to the latest user message for AI
-                  if (m.role === 'user' && m.content === input.trim() && context) {
-                    return { role: 'user' as const, content: `${m.content}\n\n[Current Sheet Context]\n${context}` };
-                  }
-                  return { role: m.role, content: m.content };
-                }),
-                { role: 'assistant', tool_calls: data.choices[0].message.tool_calls },
-                ...toolResponses,
-                { role: 'assistant', tool_calls: followUpData.choices[0].message.tool_calls },
-                ...followUpToolResponses,
-              ],
-              tools: getTools(),
-              tool_choice: 'auto',
-              max_tokens: 4096,
-            }),
+            const newMessages = finalMessages.filter((msg: any) => {
+              // Skip system messages and messages we already have
+              if (msg.role === 'system') return false;
+              // Include assistant messages with tool_calls, tool responses, and final assistant message
+              return msg.role === 'assistant' || msg.role === 'tool';
+            });
+            return [...withoutTemp, ...newMessages];
           });
 
-          if (!finalFollowUpResponse.ok) {
-            let errorMessage = `HTTP ${finalFollowUpResponse.status}: ${finalFollowUpResponse.statusText}`;
-            try {
-              const errorData = await finalFollowUpResponse.json();
-              errorMessage = errorData.error?.message || errorData.message || errorMessage;
-              console.error('OpenRouter Final Follow-up API Error:', {
-                status: finalFollowUpResponse.status,
-                statusText: finalFollowUpResponse.statusText,
-                error: errorData,
-              });
-            } catch {
-              const text = await finalFollowUpResponse.text();
-              console.error('OpenRouter Final Follow-up API Error (non-JSON):', {
-                status: finalFollowUpResponse.status,
-                statusText: finalFollowUpResponse.statusText,
-                body: text.substring(0, 500),
-              });
-            }
-
-            if (finalFollowUpResponse.status === 401) {
-              throw new Error(`OpenRouter authentication failed. Please check your API key in .env file. Error: ${errorMessage}`);
-            }
-            throw new Error(`Failed to get final follow-up response from OpenRouter: ${errorMessage}`);
-          }
-
-          const finalFollowUpData = await finalFollowUpResponse.json();
-          console.log('Final follow-up data:', finalFollowUpData);
-          const finalMessage: Message = {
-            role: 'assistant',
-            content: finalFollowUpData.choices?.[0]?.message?.content || 'Operations completed successfully.',
-            timestamp: new Date(),
-          };
-          setMessages((prev) => [...prev, finalMessage]);
-
           // Trigger save after operations
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           if (typeof window !== 'undefined' && (window as any).saveWorkbookData) {
@@ -1247,23 +1296,20 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
               await (window as any).saveWorkbookData();
             }, 500);
           }
-        } else {
-          // No more tool calls, final response
-          const finalMessage: Message = {
+
+          // OLD CODE REMOVED - All tool call handling now done by recursive handleToolCallsRecursive function above
+        } catch (error) {
+          console.error('Error in tool call execution:', error);
+          const errorMessage: Message = {
             role: 'assistant',
-            content: followUpData.choices?.[0]?.message?.content || 'Operations completed successfully.',
+            content: `Sorry, I encountered an error while executing operations: ${error instanceof Error ? error.message : 'Unknown error'}`,
             timestamp: new Date(),
           };
-          setMessages((prev) => [...prev, finalMessage]);
-
-          // Trigger save after operations
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          if (typeof window !== 'undefined' && (window as any).saveWorkbookData) {
-            setTimeout(async () => {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              await (window as any).saveWorkbookData();
-            }, 500);
-          }
+          setMessages((prev) => {
+            // Remove the temporary "Executing operations..." message and add error
+            const withoutTemp = prev.filter((msg, idx) => !(idx === prev.length - 1 && msg.content === 'Executing operations...'));
+            return [...withoutTemp, errorMessage];
+          });
         }
       } else {
         // No tool calls, direct response
