@@ -48,15 +48,15 @@ import '@univerjs-pro/mcp-ui/lib/index.css';
 // Define merge function with deep merging for nested objects
 const merge = <T extends Record<string, any>>(target: T, ...sources: any[]): T => {
   const result: any = { ...target };
-  
+
   for (const source of sources) {
     if (!source) continue;
-    
+
     for (const key in source) {
       if (source.hasOwnProperty(key)) {
         const sourceValue = source[key];
         const targetValue = result[key];
-        
+
         // Deep merge if both values are objects and not arrays
         if (
           typeof sourceValue === 'object' &&
@@ -73,13 +73,13 @@ const merge = <T extends Record<string, any>>(target: T, ...sources: any[]): T =
       }
     }
   }
-  
+
   return result;
 };
 
-interface SpreadsheetProps {}
+interface SpreadsheetProps { }
 
-export default function Spreadsheet({}: SpreadsheetProps) {
+export default function Spreadsheet({ }: SpreadsheetProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const univerInstanceRef = useRef<{ univerAPI: any; univer: any } | null>(null);
   const keyDownHandlerRef = useRef<((e: KeyboardEvent) => void) | null>(null);
@@ -90,7 +90,7 @@ export default function Spreadsheet({}: SpreadsheetProps) {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Check if this is a redo key combination first
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-      const isRedo = isMac 
+      const isRedo = isMac
         ? (e.metaKey && e.shiftKey && (e.key === 'z' || e.key === 'Z'))
         : ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y' || (e.shiftKey && (e.key === 'z' || e.key === 'Z'))));
 
@@ -122,32 +122,32 @@ export default function Spreadsheet({}: SpreadsheetProps) {
 
       const target = e.target as HTMLElement;
       console.log('✓ Step 3: Got target', target?.tagName);
-      
+
       // Skip ONLY if we're in a chat textarea (very specific check)
       if (target?.tagName === 'TEXTAREA') {
         const parent = target.parentElement;
-        const hasChatClass = parent?.className?.includes('chat') || 
-                           target.closest('[class*="ChatPanel"]') ||
-                           target.closest('[class*="chat-panel"]');
+        const hasChatClass = parent?.className?.includes('chat') ||
+          target.closest('[class*="ChatPanel"]') ||
+          target.closest('[class*="chat-panel"]');
         if (hasChatClass) {
           console.log('⚠ Step 4: In chat textarea, skipping');
           return;
         }
       }
       console.log('✓ Step 4: Not in chat, proceeding...');
-      
+
       // For everything else (including spreadsheet cells), execute redo
       console.log('✓ Step 5: Executing redo...');
-      
+
       try {
         const univerAPI = univerInstanceRef.current.univerAPI;
-        
+
         if (!univerAPI) {
           console.warn('⚠ Step 6: No univerAPI available');
           return;
         }
         console.log('✓ Step 6: Got univerAPI');
-        
+
         // Use the direct redo() method from univerAPI (async)
         if (typeof univerAPI.redo === 'function') {
           console.log('✓ Step 7: Calling univerAPI.redo()...');
@@ -183,12 +183,12 @@ export default function Spreadsheet({}: SpreadsheetProps) {
     };
 
     keyDownHandlerRef.current = handleKeyDown;
-    
+
     // Attach to window with capture phase for highest priority
     window.addEventListener('keydown', handleKeyDown, true);
-    
+
     console.log('✓ Global redo keyboard handler registered on window');
-    
+
     return () => {
       if (keyDownHandlerRef.current) {
         window.removeEventListener('keydown', keyDownHandlerRef.current, true);
@@ -202,16 +202,17 @@ export default function Spreadsheet({}: SpreadsheetProps) {
     // Generate a unique session ID for MCP server connection
     // Must be generated BEFORE creating Univer instance
     const sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
+
     // Store session ID globally for MCP client connection
     if (typeof window !== 'undefined') {
       (window as any).univerSessionId = sessionId;
     }
 
     // Create Univer instance with preset and MCP plugins
+    // Only use the user's Univer MCP key from their profile - no env var fallback
     const universerEndpoint = window.location.host;
     const collaboration = undefined;
-    const apiKey = univerMcpKey || import.meta.env.VITE_UNIVER_MCP_API_KEY || '';
+    const apiKey = univerMcpKey || null;
 
     const { univerAPI, univer } = createUniver({
       locale: LocaleType.EN_US,
@@ -302,17 +303,17 @@ export default function Spreadsheet({}: SpreadsheetProps) {
         sheets.forEach((sheet: any) => {
           try {
             const sheetName = sheet.getName?.() || 'Sheet';
-            
+
             // Get all data from the sheet
             let allData: any[][] = [];
             const maxRowsToRead = 10000;
             const maxColsToRead = 100;
-            
+
             try {
               const range = sheet.getRange(0, 0, maxRowsToRead - 1, maxColsToRead - 1);
               const values = range.getValues();
               allData = values || [];
-              
+
               // Trim empty rows from the end
               while (allData.length > 0 && allData[allData.length - 1].every(cell => !cell || cell === '')) {
                 allData.pop();
@@ -393,7 +394,7 @@ export default function Spreadsheet({}: SpreadsheetProps) {
         // Create workbook with first sheet
         const firstSheetData = workbookData[sheetNames[0]];
         univer.createUnit(UniverInstanceType.UNIVER_SHEET, {});
-        
+
         // Wait for workbook to be ready with retries
         let retries = 0;
         const maxRetries = 50; // Increased retries for slower systems
@@ -465,7 +466,7 @@ export default function Spreadsheet({}: SpreadsheetProps) {
 
               try {
                 const newSheet = workbook.insertSheet(sheetData.name || sheetName || `Sheet${index + 2}`);
-                
+
                 if (sheetData.data && sheetData.data.length > 0) {
                   const data = sheetData.data;
                   const maxRow = data.length - 1;
@@ -547,23 +548,23 @@ export default function Spreadsheet({}: SpreadsheetProps) {
           return null;
         }
       };
-      
+
       // Expose debug function to test redo manually
       (window as any).testRedo = () => {
         if (!univerInstanceRef.current) {
           console.error('No univer instance available');
           return;
         }
-        
+
         const univerAPI = univerInstanceRef.current.univerAPI;
-        
+
         if (!univerAPI) {
           console.error('No univerAPI found');
           return;
         }
-        
+
         console.log('🔍 Testing redo via univerAPI...');
-        
+
         // Method 1: Direct redo() method (async)
         if (typeof univerAPI.redo === 'function') {
           console.log('✓ Found univerAPI.redo() method');
@@ -576,7 +577,7 @@ export default function Spreadsheet({}: SpreadsheetProps) {
         } else {
           console.warn('⚠ univerAPI.redo() is not available');
         }
-        
+
         // Method 2: executeCommand with univer.command.redo
         if (typeof univerAPI.executeCommand === 'function') {
           console.log('✓ Found univerAPI.executeCommand() method');
@@ -590,10 +591,10 @@ export default function Spreadsheet({}: SpreadsheetProps) {
         } else {
           console.warn('⚠ univerAPI.executeCommand() is not available');
         }
-        
+
         console.warn('⚠ Could not execute redo - no methods available');
       };
-      
+
       // Set up auto-save with debouncing
       const debouncedSave = () => {
         if (saveTimeout) clearTimeout(saveTimeout);
@@ -618,7 +619,7 @@ export default function Spreadsheet({}: SpreadsheetProps) {
       // Note: Keyboard handler is registered in a separate useEffect above
       // to ensure it's attached before Univer initializes
     }
-    
+
     // Clean up on unmount
     return () => {
       if (autoSaveInterval) clearInterval(autoSaveInterval);
@@ -633,7 +634,7 @@ export default function Spreadsheet({}: SpreadsheetProps) {
         univerInstanceRef.current = null;
       }
     };
-    
+
     console.log('Univer MCP configured with sessionId:', sessionId);
   }, []);
 

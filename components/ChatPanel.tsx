@@ -357,9 +357,8 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
   useEffect(() => {
     const fetchMcpTools = async () => {
       try {
-        const apiKey = univerMcpKey || import.meta.env.VITE_UNIVER_MCP_API_KEY || '';
-        if (!apiKey) {
-          console.warn('No MCP API key configured, using local tools only');
+        if (!univerMcpKey) {
+          console.warn('No MCP API key configured. Please add your Univer MCP API key in your profile settings. Using local tools only.');
           return;
         }
 
@@ -377,7 +376,7 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${apiKey}`,
+              'Authorization': `Bearer ${univerMcpKey}`,
               'Accept': 'application/json, text/event-stream',
             },
             body: JSON.stringify({
@@ -485,8 +484,7 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
 
     console.log(`Tool "${name}": routing to MCP server (attempt ${3 - retries}/${3})`, 'args:', JSON.stringify(args));
 
-    const apiKey = univerMcpKey || import.meta.env.VITE_UNIVER_MCP_API_KEY || '';
-    if (!apiKey) {
+    if (!univerMcpKey) {
       return JSON.stringify({ error: 'MCP API key not configured. Please add your Univer MCP API key in your profile settings.' });
     }
 
@@ -503,7 +501,7 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
           signal: controller.signal,
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
+            'Authorization': `Bearer ${univerMcpKey}`,
             'Accept': 'application/json, text/event-stream',
           },
           body: JSON.stringify({
@@ -941,8 +939,7 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
     setIsLoading(true);
 
     try {
-      const apiKey = openRouterKey || import.meta.env.VITE_OPENROUTER_API_KEY || '';
-      if (!apiKey) {
+      if (!openRouterKey) {
         throw new Error('OpenRouter API key is not configured. Please add your OpenRouter API key in your profile settings.');
       }
 
@@ -952,7 +949,7 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
+          'Authorization': `Bearer ${openRouterKey}`,
           'HTTP-Referer': window.location.origin,
           'X-Title': 'SheetGrid',
         },
@@ -1064,9 +1061,8 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
         }
 
         // Send the results back to OpenRouter for a final response
-        const apiKey2 = import.meta.env.VITE_OPENROUTER_API_KEY || '';
-        if (!apiKey2) {
-          throw new Error('OpenRouter API key is not configured. Please set VITE_OPENROUTER_API_KEY in your .env file.');
+        if (!openRouterKey) {
+          throw new Error('OpenRouter API key is not configured. Please add your OpenRouter API key in your profile settings.');
         }
 
         const followUpResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -1074,7 +1070,7 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey2}`,
+            'Authorization': `Bearer ${openRouterKey}`,
             'HTTP-Referer': window.location.origin,
             'X-Title': 'SheetGrid',
           },
@@ -1183,7 +1179,7 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${apiKey2}`,
+              'Authorization': `Bearer ${openRouterKey}`,
               'HTTP-Referer': window.location.origin,
               'X-Title': 'SheetGrid',
             },
