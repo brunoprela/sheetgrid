@@ -828,7 +828,10 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
                 });
 
                 try {
-                  const range = firstSheet.getRange(startRow, 0, endRow, maxCols - 1);
+                  // getRange(row, column, numRows, numColumns) - note: numRows is the COUNT, not end index
+                  const numRows = batch.length;
+                  const numCols = maxCols;
+                  const range = firstSheet.getRange(startRow, 0, numRows, numCols);
                   range.setValues(formattedBatch);
                   console.log(`✅ Set rows ${startRow} to ${endRow}`);
                 } catch (batchError) {

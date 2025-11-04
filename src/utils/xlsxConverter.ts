@@ -183,10 +183,14 @@ export async function importXLSXToWorkbookData(file: File): Promise<IWorkbookDat
         // Read the XLSX workbook
         // XLSX.read() reads all cells by default, regardless of !ref range
         // The !ref property is just a convenience hint, but all cells are available in the ws object
+        // We use 'raw: false' to get formatted values, and 'cellFormula: true' to preserve formulas
         const wb = XLSX.read(data, {
           type: 'binary',
           cellFormula: true,
           cellDates: true,
+          cellStyles: true, // Include cell styles
+          sheetStubs: false, // Don't create stub cells for empty cells
+          // Note: sheet_to_json with defval can help us find the true extent of data
         });
 
         // Convert to Univer workbook format
@@ -212,11 +216,48 @@ export async function importXLSXToWorkbookData(file: File): Promise<IWorkbookDat
           let maxRow = -1;
           let maxCol = -1;
 
+          // Try to get the true extent using multiple methods
+          // Method 1: Check if !ref range exists and parse it
+          const initialRangeFromRef: XLSX.Range | null = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : null;
+          if (initialRangeFromRef) {
+            // Start with the !ref range as a baseline
+            maxRow = Math.max(maxRow, initialRangeFromRef.e.r); // e.r is end row
+            maxCol = Math.max(maxCol, initialRangeFromRef.e.c); // e.c is end column
+            console.log(`📋 !ref range: ${ws['!ref']} (rows 0-${initialRangeFromRef.e.r}, cols 0-${initialRangeFromRef.e.c})`);
+          }
+
+          // Method 2: Try sheet_to_json to get a dense representation
+          // Note: This might also be limited by !ref, but it's worth checking
+          let jsonData: any[][] = [];
+          try {
+            jsonData = XLSX.utils.sheet_to_json(ws, {
+              header: 1, // Return as 2D array
+              defval: null, // Use null for empty cells
+              raw: false, // Get formatted values
+            }) as any[][];
+
+            // Find the maximum row and column from the JSON data
+            if (jsonData && jsonData.length > 0) {
+              const jsonMaxRow = jsonData.length - 1; // -1 because rows are 0-indexed
+              const jsonMaxCol = jsonData.reduce((max, row) => {
+                return Math.max(max, row ? (row.length - 1) : -1);
+              }, -1);
+
+              maxRow = Math.max(maxRow, jsonMaxRow);
+              maxCol = Math.max(maxCol, jsonMaxCol);
+              console.log(`📋 JSON parsing found: ${jsonData.length} rows, max col: ${jsonMaxCol}`);
+            }
+          } catch (jsonError) {
+            console.warn('Could not parse sheet to JSON, falling back to cell-by-cell parsing:', jsonError);
+          }
+
           // Iterate through ALL cell addresses in the worksheet object
-          // In sparse mode (dense: false), ALL cells are included as keys, even those outside !ref
+          // This captures cells that might have formatting but no values, or cells outside !ref
           // Cell addresses are keys like "A1", "B2", etc.
+          // IMPORTANT: This should capture ALL cells that exist in the XLSX file's XML structure
           const cellAddressPattern = /^[A-Z]+[0-9]+$/;
           let cellCount = 0;
+          let cellsOutsideRef = 0;
 
           for (const cellAddress in ws) {
             // Skip special properties that start with !
@@ -239,7 +280,15 @@ export async function importXLSXToWorkbookData(file: File): Promise<IWorkbookDat
             const R = decoded.r;
             const C = decoded.c;
 
+            // Check if this cell is outside the !ref range (if !ref exists)
+            if (initialRangeFromRef) {
+              if (R > initialRangeFromRef.e.r || C > initialRangeFromRef.e.c) {
+                cellsOutsideRef++;
+              }
+            }
+
             // Update max row and column (this ensures we capture all cells with data)
+            // Use Math.max to take the larger of what we found in JSON parsing vs cell-by-cell
             if (R > maxRow) maxRow = R;
             if (C > maxCol) maxCol = C;
 
@@ -298,14 +347,27 @@ export async function importXLSXToWorkbookData(file: File): Promise<IWorkbookDat
           // we capture ALL cells, even those beyond the !ref range
 
           // Debug logging to understand what we're importing
+          const totalRowsInMatrix = Object.keys(cellMatrix).length;
+          const totalCellsInMatrix = Object.keys(cellMatrix).reduce((sum, rowKey) => {
+            return sum + Object.keys(cellMatrix[rowKey] || {}).length;
+          }, 0);
+
           console.log(`📊 Importing sheet "${sheetName}":`, {
             rangeFromRef: ws['!ref'] || 'none',
             maxRowFromCells: maxRow,
             maxColFromCells: maxCol,
-            totalRowsInMatrix: Object.keys(cellMatrix).length,
+            rowsInJSON: jsonData.length,
+            totalRowsInMatrix: totalRowsInMatrix,
             totalCellAddresses: cellCount,
-            cellsPerRow: Object.keys(cellMatrix).map(rowKey => Object.keys(cellMatrix[rowKey] || {}).length).reduce((a, b) => a + b, 0) / Math.max(Object.keys(cellMatrix).length, 1),
+            cellsOutsideRefRange: cellsOutsideRef,
+            totalCellsInMatrix: totalCellsInMatrix,
+            cellsPerRowAvg: totalRowsInMatrix > 0 ? (totalCellsInMatrix / totalRowsInMatrix).toFixed(2) : 0,
           });
+
+          // Warn if we found cells outside the !ref range - this is good, it means we're reading more than Excel reported
+          if (cellsOutsideRef > 0) {
+            console.log(`✅ Found ${cellsOutsideRef} cells outside the reported !ref range - these will be imported!`);
+          }
 
           // Create sheet data
           // For infinite scrolling, we can either:
