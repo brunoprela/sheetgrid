@@ -107,6 +107,7 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   const [selectedModel, setSelectedModel] = useState('anthropic/claude-3-haiku');
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
@@ -1492,7 +1493,7 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
           </div>
         </div>
 
-        {/* Info button */}
+        {/* Action buttons */}
         <div className="absolute top-0 right-0 px-3 py-2.5">
           <button
             onClick={() => setShowInfo(!showInfo)}
@@ -1751,6 +1752,91 @@ Example of calculation response: "The total revenue of all rows is $542,893."`,
                 ) : (
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                )}
+              </button>
+
+              {/* Download document button */}
+              <button
+                type="button"
+                onClick={async (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  console.log('Download button clicked');
+
+                  if (isDownloading) return; // Prevent multiple clicks
+
+                  setIsDownloading(true);
+                  try {
+                    // Wait for the export function to be available (poll with timeout)
+                    let exportFn = (window as any).exportWorkbookToXLSX;
+                    const maxAttempts = 50; // Try for up to 5 seconds
+                    let attempts = 0;
+
+                    console.log('Checking for export function, attempt:', attempts, 'found:', !!exportFn);
+                    while (!exportFn && attempts < maxAttempts) {
+                      await new Promise(resolve => setTimeout(resolve, 100));
+                      exportFn = (window as any).exportWorkbookToXLSX;
+                      attempts++;
+                      if (exportFn) {
+                        console.log('Export function found after', attempts, 'attempts');
+                      }
+                    }
+
+                    // Fallback: try to use univerAPI directly if available
+                    if (!exportFn) {
+                      console.log('Export function not found, trying fallback with univerAPI');
+                      const univerAPI = (window as any).univerAPI;
+                      if (univerAPI) {
+                        try {
+                          const workbook = univerAPI.getActiveWorkbook();
+                          if (workbook) {
+                            console.log('Got workbook from univerAPI, saving snapshot...');
+                            const workbookSnapshot = workbook.save();
+                            if (workbookSnapshot) {
+                              // Import the export function dynamically
+                              const { exportWorkbookToXLSX } = await import('../src/utils/xlsxConverter');
+                              const filename = `workbook-${new Date().toISOString().split('T')[0]}.xlsx`;
+                              console.log('Exporting workbook as', filename);
+                              await exportWorkbookToXLSX(workbookSnapshot, filename);
+                              console.log('Export completed successfully');
+                              return;
+                            }
+                          }
+                        } catch (fallbackError) {
+                          console.error('Fallback export error:', fallbackError);
+                          alert(`Failed to export workbook: ${fallbackError instanceof Error ? fallbackError.message : 'Unknown error'}`);
+                          return;
+                        }
+                      }
+
+                      alert('Export functionality is not available yet. Please wait for the spreadsheet to load.');
+                      return;
+                    }
+
+                    console.log('Using export function, exporting...');
+                    const filename = `workbook-${new Date().toISOString().split('T')[0]}.xlsx`;
+                    await exportFn(filename);
+                    console.log('Export completed successfully');
+                  } catch (error) {
+                    console.error('Error exporting workbook:', error);
+                    alert(`Failed to export workbook: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                  } finally {
+                    setIsDownloading(false);
+                  }
+                }}
+                disabled={isDownloading}
+                className="p-1.5 text-[#666666] hover:text-[#333333] hover:bg-[#F0F0F0] rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title={isDownloading ? 'Downloading...' : 'Download as XLSX'}
+              >
+                {isDownloading ? (
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
                   </svg>
                 )}
               </button>

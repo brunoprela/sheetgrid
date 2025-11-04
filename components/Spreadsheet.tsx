@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { createUniver, LocaleType, UniverInstanceType, LogLevel, defaultTheme } from '@univerjs/presets';
 import { saveWorkbookData as saveWorkbookDataToIndexedDB, loadWorkbookData as loadWorkbookDataFromIndexedDB } from '../src/utils/indexeddb';
 import { useUserApiKeys } from '../src/hooks/useUserApiKeys';
+import { importXLSXToWorkbookData } from '../src/utils/xlsxConverter';
 import { UniverSheetsCorePreset } from '@univerjs/presets/preset-sheets-core';
 import UniverPresetSheetsCoreEnUS from '@univerjs/presets/preset-sheets-core/locales/en-US';
 import { UniverSheetsAdvancedPreset } from '@univerjs/presets/preset-sheets-advanced';
@@ -211,7 +212,6 @@ export default function Spreadsheet({ }: SpreadsheetProps) {
 
     // Create Univer instance with preset and MCP plugins
     // Only use the user's Univer MCP key from their profile - no env var fallback
-    const universerEndpoint = window.location.host;
     const collaboration = undefined;
     const apiKey = univerMcpKey || null;
 
@@ -249,7 +249,8 @@ export default function Spreadsheet({ }: SpreadsheetProps) {
         }),
         UniverSheetsAdvancedPreset({
           useWorker: false,
-          universerEndpoint,
+          // Removed universerEndpoint - we use client-side import/export instead
+          // Setting this would try to connect to a server that doesn't exist, causing 405 errors
         }),
         UniverSheetsThreadCommentPreset({
           collaboration,
@@ -284,40 +285,52 @@ export default function Spreadsheet({ }: SpreadsheetProps) {
 
     // Function to save workbook data to IndexedDB using Univer's official save() method
     const saveWorkbookData = async () => {
-      // Don't save while data is still loading to prevent overwriting saved data with empty workbook
+      // Don't save while data is still loading
       if (isLoadingDataRef.current) {
-        console.log('⏳ Skipping save - data is still loading');
+        console.log('⏸ Skipping save - data is still loading');
+        return;
+      }
+
+      if (!univerInstanceRef.current) {
+        console.log('⏸ Skipping save - no Univer instance');
+        return;
+      }
+
+      const { univerAPI } = univerInstanceRef.current;
+      const workbook = univerAPI.getActiveWorkbook();
+
+      if (!workbook) {
+        console.log('⏸ Skipping save - no active workbook');
         return;
       }
 
       try {
-        const workbook = univerAPI.getActiveWorkbook();
-        if (!workbook) {
-          console.warn('No workbook available for saving');
-          return;
-        }
-
-        // Use Univer's official save() method to get complete workbook snapshot
         const workbookSnapshot = workbook.save();
 
-        if (!workbookSnapshot) {
-          console.warn('Failed to get workbook snapshot');
-          return;
+        // Ensure all sheets have at least 100,000 rows and 1,000 columns
+        // This allows users to scroll to these limits. Univer's virtual scrolling handles rendering efficiently.
+        const MIN_ROWS = 100000;
+        const MIN_COLS = 1000;
+        if (workbookSnapshot && workbookSnapshot.sheets) {
+          for (const sheetId in workbookSnapshot.sheets) {
+            const sheet = workbookSnapshot.sheets[sheetId];
+            if (sheet) {
+              // Set rowCount and columnCount to at least MIN_ROWS/MIN_COLS if not already set or if they're lower
+              if (!(sheet as any).rowCount || (sheet as any).rowCount < MIN_ROWS) {
+                (sheet as any).rowCount = MIN_ROWS;
+              }
+              if (!(sheet as any).columnCount || (sheet as any).columnCount < MIN_COLS) {
+                (sheet as any).columnCount = MIN_COLS;
+              }
+            }
+          }
         }
 
-        // Save to IndexedDB
-        if (typeof window !== 'undefined') {
-          await saveWorkbookDataToIndexedDB(workbookSnapshot);
-          console.log('✅ Workbook data saved to IndexedDB:', {
-            workbookId: workbookSnapshot.id,
-            workbookName: workbookSnapshot.name,
-            sheetCount: workbookSnapshot.sheetOrder?.length || 0,
-            sheetNames: workbookSnapshot.sheetOrder || [],
-            timestamp: new Date().toISOString(),
-          });
-        }
+        console.log('💾 Saving workbook data to IndexedDB...');
+        await saveWorkbookDataToIndexedDB(workbookSnapshot);
+        console.log('✅ Workbook data saved successfully');
       } catch (error) {
-        console.error('Error saving workbook to IndexedDB:', error);
+        console.error('❌ Error saving workbook data:', error);
       }
     };
 
@@ -354,6 +367,24 @@ export default function Spreadsheet({ }: SpreadsheetProps) {
           sheetCount: workbookData.sheetOrder?.length || 0,
           sheetNames: workbookData.sheetOrder || [],
         });
+
+        // Ensure all sheets have at least 100,000 rows and 1,000 columns when loading
+        const MIN_ROWS = 100000;
+        const MIN_COLS = 1000;
+        if (workbookData && workbookData.sheets) {
+          for (const sheetId in workbookData.sheets) {
+            const sheet = workbookData.sheets[sheetId];
+            if (sheet) {
+              // Set rowCount and columnCount to at least MIN_ROWS/MIN_COLS if not already set or if they're lower
+              if (!(sheet as any).rowCount || (sheet as any).rowCount < MIN_ROWS) {
+                (sheet as any).rowCount = MIN_ROWS;
+              }
+              if (!(sheet as any).columnCount || (sheet as any).columnCount < MIN_COLS) {
+                (sheet as any).columnCount = MIN_COLS;
+              }
+            }
+          }
+        }
 
         // Use Univer's official createWorkbook() method to restore the complete workbook
         try {
@@ -575,6 +606,14 @@ export default function Spreadsheet({ }: SpreadsheetProps) {
       }
       // Keyboard handler cleanup is in the separate useEffect above
       saveWorkbookData().catch(console.error); // Final save
+
+      // Cleanup global functions and file input
+      delete (window as any).exportWorkbookToXLSX;
+      delete (window as any).importXLSXFile;
+      if (univerInstanceRef.current && (univerInstanceRef.current as any).fileInput) {
+        ((univerInstanceRef.current as any).fileInput as HTMLInputElement).remove();
+      }
+
       if (univerInstanceRef.current) {
         univerInstanceRef.current.univerAPI.dispose();
         univerInstanceRef.current = null;
@@ -582,6 +621,98 @@ export default function Spreadsheet({ }: SpreadsheetProps) {
     };
 
     console.log('Univer MCP configured with sessionId:', sessionId);
+
+    // Expose export function globally so ChatPanel can call it
+    (window as any).exportWorkbookToXLSX = async (filename?: string) => {
+      try {
+        const workbook = univerAPI.getActiveWorkbook();
+        if (!workbook) {
+          throw new Error('No workbook available');
+        }
+        const workbookSnapshot = workbook.save();
+        if (!workbookSnapshot) {
+          throw new Error('Failed to get workbook snapshot');
+        }
+        // Import the export function dynamically to avoid circular dependencies
+        const { exportWorkbookToXLSX } = await import('../src/utils/xlsxConverter');
+        await exportWorkbookToXLSX(workbookSnapshot, filename || 'workbook.xlsx');
+      } catch (error) {
+        console.error('Error exporting workbook:', error);
+        throw error;
+      }
+    };
+
+    // Add file input for importing XLSX files
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.xlsx,.xls';
+    fileInput.style.display = 'none';
+    fileInput.addEventListener('change', async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+
+      try {
+        // Import XLSX file
+        const workbookData = await importXLSXToWorkbookData(file);
+
+        // Check if it's the old data format (for backwards compatibility)
+        if (!workbookData.sheets || !workbookData.sheetOrder) {
+          console.warn('Invalid workbook data format');
+          return;
+        }
+
+        // Ensure all sheets have at least 100,000 rows and 1,000 columns
+        // The XLSX import already sets these, but we ensure they're at least MIN_ROWS/MIN_COLS
+        const MIN_ROWS = 100000;
+        const MIN_COLS = 1000;
+        if (workbookData && workbookData.sheets) {
+          for (const sheetId in workbookData.sheets) {
+            const sheet = workbookData.sheets[sheetId];
+            if (sheet) {
+              // Set rowCount and columnCount to at least MIN_ROWS/MIN_COLS if not already set or if they're lower
+              if (!(sheet as any).rowCount || (sheet as any).rowCount < MIN_ROWS) {
+                (sheet as any).rowCount = MIN_ROWS;
+              }
+              if (!(sheet as any).columnCount || (sheet as any).columnCount < MIN_COLS) {
+                (sheet as any).columnCount = MIN_COLS;
+              }
+            }
+          }
+        }
+
+        // Set loading flag to prevent auto-save from overwriting
+        isLoadingDataRef.current = true;
+
+        // Create workbook from imported data
+        try {
+          const createdWorkbook = univerAPI.createWorkbook(workbookData);
+          console.log('✅ Workbook imported from XLSX:', createdWorkbook?.getId());
+
+          // Save imported data to IndexedDB
+          await saveWorkbookDataToIndexedDB(workbookData);
+          console.log('✅ Imported workbook saved to IndexedDB');
+        } catch (error) {
+          console.error('❌ Error creating workbook from imported data:', error);
+          throw error;
+        } finally {
+          isLoadingDataRef.current = false;
+        }
+      } catch (error) {
+        console.error('Error importing XLSX file:', error);
+        alert(`Failed to import file: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      } finally {
+        // Reset file input
+        fileInput.value = '';
+      }
+    });
+
+    // Expose import function globally
+    (window as any).importXLSXFile = () => {
+      fileInput.click();
+    };
+
+    // Store fileInput reference for cleanup
+    (univerInstanceRef.current as any).fileInput = fileInput;
   }, []);
 
   return <div ref={containerRef} className="h-full w-full" />;
